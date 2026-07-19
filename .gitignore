@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# The PaySim dataset is larger than GitHub's regular file limit.
+data/*.csv
+!data/.gitkeep

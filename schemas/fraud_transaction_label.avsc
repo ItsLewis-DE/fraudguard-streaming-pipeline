@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "FraudTransactionLabel",
+  "namespace": "fraudguard.events",
+  "fields": [
+    {"name": "schema_version", "type": "int"},
+    {"name": "event_id", "type": "string"},
+    {"name": "source", "type": "string"},
+    {
+      "name": "observed_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {"name": "isFraud", "type": "int"},
+    {"name": "isFlaggedFraud", "type": "int"}
+  ]
+}

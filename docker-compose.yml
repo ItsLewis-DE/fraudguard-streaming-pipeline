@@ -58,9 +58,35 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.2
+    container_name: schema-registry
+    hostname: schema-registry
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:19092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: "1"
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8081/subjects >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   kafka-topic-init:
     image: apache/kafka:3.9.2
@@ -75,19 +101,156 @@ services:
       kafka:
         condition: service_healthy
 
-  paysim:
-    build:
-      context: ./paysim
-    container_name: paysim
-    restart: "no"
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: minio
+    hostname: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     environment:
-      PAYSIM_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
-      PAYSIM_KAFKA_TRANSACTION_TOPIC: fraud.transaction
-      PAYSIM_KAFKA_LABEL_TOPIC: fraud.transaction.label
-    command: ["run", "-file", "/app/PaySim.properties", "1"]
+      MINIO_ROOT_USER: fraudguard
+      MINIO_ROOT_PASSWORD: fraudguard-secret
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: minio-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 fraudguard fraudguard-secret
+        mc mb --ignore-existing local/fraud-lake
     depends_on:
-      kafka-topic-init:
+      minio:
+        condition: service_healthy
+
+  hive-metastore-db:
+    image: postgres:16-alpine
+    container_name: hive-metastore-db
+    hostname: hive-metastore-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive-password
+    volumes:
+      - hive_metastore_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  hive-metastore:
+    build:
+      context: .
+      dockerfile: docker/hive/Dockerfile
+    container_name: hive-metastore
+    hostname: hive-metastore
+    restart: unless-stopped
+    ports:
+      - "9083:9083"
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+      SERVICE_OPTS: >-
+        -Xmx1G
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-metastore-db:5432/metastore
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive-password
+        -Dmetastore.try.direct.sql.ddl=false
+    volumes:
+      - ./docker/hive/conf:/hive_custom_conf:ro
+    depends_on:
+      hive-metastore-db:
+        condition: service_healthy
+      minio-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9083'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  spark-master:
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    container_name: spark-master
+    hostname: spark-master
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    ports:
+      - "7077:7077"
+      - "8083:8080"
+    volumes:
+      - ./docker/spark/conf:/opt/spark/conf/custom:ro
+    environment:
+      SPARK_CONF_DIR: /opt/spark/conf/custom
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/7077'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  spark-worker:
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    container_name: spark-worker
+    hostname: spark-worker
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --webui-port
+      - "8081"
+      - --cores
+      - "2"
+      - --memory
+      - 2G
+      - spark://spark-master:7077
+    ports:
+      - "8082:8081"
+    environment:
+      SPARK_CONF_DIR: /opt/spark/conf/custom
+    volumes:
+      - ./docker/spark/conf:/opt/spark/conf/custom:ro
+      - spark_worker_data:/opt/spark/work
+    depends_on:
+      spark-master:
+        condition: service_healthy
 
 volumes:
   kafka_data:
+  minio_data:
+  hive_metastore_db:
+  spark_worker_data:

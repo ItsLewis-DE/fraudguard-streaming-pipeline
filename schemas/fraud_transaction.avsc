@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "FraudTransaction",
+  "namespace": "fraudguard.events",
+  "fields": [
+    {"name": "schema_version", "type": "int"},
+    {"name": "event_id", "type": "string"},
+    {"name": "source", "type": "string"},
+    {
+      "name": "ingested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {"name": "step", "type": "int"},
+    {"name": "type", "type": "string"},
+    {"name": "amount", "type": "double"},
+    {"name": "nameOrig", "type": "string"},
+    {"name": "oldbalanceOrg", "type": "double"},
+    {"name": "newbalanceOrig", "type": "double"},
+    {"name": "nameDest", "type": "string"},
+    {"name": "oldbalanceDest", "type": "double"},
+    {"name": "newbalanceDest", "type": "double"}
+  ]
+}

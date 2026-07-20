@@ -3,7 +3,6 @@
   "name": "FraudTransactionLabel",
   "namespace": "fraudguard.events",
   "fields": [
-    {"name": "schema_version", "type": "int"},
     {"name": "event_id", "type": "string"},
     {"name": "source", "type": "string"},
     {

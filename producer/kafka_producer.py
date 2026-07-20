@@ -234,8 +234,7 @@ def produce_with_backpressure(
                 key=key,
                 value=value,
                 headers={
-                    "content-type": "application/vnd.apache.avro+binary",
-                    "schema-version": "1",
+                    "content-type": "application/vnd.apache.avro+binary"
                 },
                 on_delivery=stats.callback,
             )

@@ -215,7 +215,7 @@ services:
       hive-metastore:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/7077'"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/spark-master/7077'"]
       interval: 10s
       timeout: 5s
       retries: 12

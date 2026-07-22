@@ -171,20 +171,19 @@ def validate_header(fieldnames: list[str] | None) -> None:
     if missing:
         raise ValueError(f"CSV is missing required columns: {sorted(missing)}")
 
-
 def convert_paysim_row(
-    row: Mapping[str, str], row_number: int
+    row: Mapping[str, str], row_number: int, epoch: DateTime
 ) -> tuple[dict[str, object], dict[str, object]]:
-    """Create a feature event and a separate ground-truth label."""
+    
     event_id = f"paysim-{row_number:010d}"
     ingested_at = int(time.time() * 1000)
+    step = int(row["step"])
 
     event = {
-        "schema_version": 1,
         "event_id": event_id,
         "source": "paysim",
+        "event_time": event_time,
         "ingested_at": ingested_at,
-        "step": int(row["step"]),
         "type": row["type"],
         "amount": float(row["amount"]),
         "nameOrig": row["nameOrig"],
@@ -195,7 +194,6 @@ def convert_paysim_row(
         "newbalanceDest": float(row["newbalanceDest"]),
     }
     label = {
-        "schema_version": 1,
         "event_id": event_id,
         "source": "paysim",
         "observed_at": ingested_at,
@@ -277,6 +275,8 @@ def replay_csv(
         validate_header(reader.fieldnames)
 
         for row_number, row in enumerate(reader, start=1):
+            step = int(row["step"])
+
             if row_number <= skip_rows:
                 continue
             if max_records is not None and published >= max_records:

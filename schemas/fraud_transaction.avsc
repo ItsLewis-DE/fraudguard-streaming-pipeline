@@ -3,9 +3,19 @@
   "name": "FraudTransaction",
   "namespace": "fraudguard.events",
   "fields": [
-    {"name": "schema_version", "type": "int"},
     {"name": "event_id", "type": "string"},
     {"name": "source", "type": "string"},
+    {
+      "name": "event_time",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
     {
       "name": "ingested_at",
       "type": {

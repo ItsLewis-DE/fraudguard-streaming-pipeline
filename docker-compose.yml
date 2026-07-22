@@ -122,72 +122,6 @@ services:
       retries: 12
       start_period: 15s
 
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    container_name: minio-init
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc alias set local http://minio:9000 fraudguard fraudguard-secret
-        mc mb --ignore-existing local/fraud-lake
-    depends_on:
-      minio:
-        condition: service_healthy
-
-  hive-metastore-db:
-    image: postgres:16-alpine
-    container_name: hive-metastore-db
-    hostname: hive-metastore-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: metastore
-      POSTGRES_USER: hive
-      POSTGRES_PASSWORD: hive-password
-    volumes:
-      - hive_metastore_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  hive-metastore:
-    build:
-      context: .
-      dockerfile: docker/hive/Dockerfile
-    container_name: hive-metastore
-    hostname: hive-metastore
-    restart: unless-stopped
-    ports:
-      - "9083:9083"
-    environment:
-      SERVICE_NAME: metastore
-      DB_DRIVER: postgres
-      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
-      SERVICE_OPTS: >-
-        -Xmx1G
-        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
-        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-metastore-db:5432/metastore
-        -Djavax.jdo.option.ConnectionUserName=hive
-        -Djavax.jdo.option.ConnectionPassword=hive-password
-        -Dmetastore.try.direct.sql.ddl=false
-    volumes:
-      - ./docker/hive/conf:/hive_custom_conf:ro
-    depends_on:
-      hive-metastore-db:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9083'"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 30s
-
   spark-master:
     build:
       context: .
@@ -209,10 +143,11 @@ services:
       - "8083:8080"
     volumes:
       - ./docker/spark/conf:/opt/spark/conf/custom:ro
+      - ./spark/jobs:/opt/spark/jobs:ro
     environment:
       SPARK_CONF_DIR: /opt/spark/conf/custom
     depends_on:
-      hive-metastore:
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/spark-master/7077'"]
@@ -244,7 +179,7 @@ services:
       SPARK_CONF_DIR: /opt/spark/conf/custom
     volumes:
       - ./docker/spark/conf:/opt/spark/conf/custom:ro
-      - spark_worker_data:/opt/spark/work
+      - ./spark/jobs:/opt/spark/jobs:ro
     depends_on:
       spark-master:
         condition: service_healthy
@@ -252,5 +187,3 @@ services:
 volumes:
   kafka_data:
   minio_data:
-  hive_metastore_db:
-  spark_worker_data:

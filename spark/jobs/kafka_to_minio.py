@@ -41,12 +41,12 @@ SCHEMA_REGISTRY_URL = os.getenv(
 )
 SCHEMA_SUBJECT = f"{KAFKA_TOPIC}-value"
 
-BRONZE_PATH = "s3a://fraud-lake/bronze/fraud_transactions"
+VALID_PATH = "s3a://fraud-transactions"
 QUARANTINE_PATH = (
-    "s3a://fraud-lake/quarantine/fraud_transactions"
+    "s3a://fraud-transactions-quarantine"
 )
 CHECKPOINT_PATH = (
-    "s3a://fraud-lake/checkpoints/fraud_transactions_router"
+    "s3a://fraud-transactions-checkpoint/checkpoint"
 )
 
 
@@ -84,7 +84,6 @@ def load_schema_catalog_once(
         raise RuntimeError(
             f"Subject chua co schema version: {subject}"
         )
-
     entries = [
         registry_get(
             registry_url,
@@ -92,7 +91,6 @@ def load_schema_catalog_once(
         )
         for version in versions
     ]
-
     latest = max(
         entries,
         key=lambda entry: int(entry["version"]),
@@ -108,7 +106,6 @@ def load_schema_catalog_once(
         reader_schema=latest["schema"],
         writer_schemas=writer_schemas,
     )
-
 
 def load_schema_catalog(
     registry_url: str,
@@ -134,7 +131,6 @@ def load_schema_catalog(
             return catalog
         except (HTTPError, URLError, TimeoutError, RuntimeError) as error:
             last_error = error
-
             if attempt == max_attempts:
                 break
 
@@ -216,9 +212,8 @@ inspected_df = (
         )
         .when(
             ~col("message_schema_id").isin(
-                *SUPPORTED_SCHEMA_IDS
-            ),
-            lit("UNSUPPORTED_SCHEMA_ID"),
+            *SUPPORTED_SCHEMA_IDS)
+            .lit("UNSUPPORTED_SCHEMA_ID"),
         )
         .otherwise(lit(None).cast("string")),
     )
@@ -283,7 +278,6 @@ def prepare_quarantine(df: DataFrame) -> DataFrame:
             base64(col("key")).alias("kafka_key_base64"),
             base64(col("value")).alias(
                 "kafka_value_base64"
-            ),
         )
         .withColumn(
             "quarantined_at",
@@ -294,8 +288,7 @@ def prepare_quarantine(df: DataFrame) -> DataFrame:
             to_date(col("kafka_timestamp")),
         )
     )
-
-
+    )
 def process_batch(batch_df: DataFrame, batch_id: int) -> None:
     if batch_df.isEmpty():
         return
@@ -333,7 +326,7 @@ def process_batch(batch_df: DataFrame, batch_id: int) -> None:
             allowMissingColumns=True,
         )
 
-        bronze_df = (
+        valid_df = (
             decoded_df
             .filter(col("transaction.event_id").isNotNull())
             .select(
@@ -352,13 +345,13 @@ def process_batch(batch_df: DataFrame, batch_id: int) -> None:
 
         batch_partition = f"{batch_id:020d}"
 
-        if not bronze_df.isEmpty():
+        if not valid_df.isEmpty():
             (
-                bronze_df.write
+                valid_df.write
                 .mode("overwrite")
                 .partitionBy("event_date")
                 .parquet(
-                    f"{BRONZE_PATH}/batch_id={batch_partition}"
+                    f"{VALID_PATH}/batch_id={batch_partition}"
                 )
             )
 

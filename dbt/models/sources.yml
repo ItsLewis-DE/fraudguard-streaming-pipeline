@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: fraudguard
+    description: Raw FraudGuard tables loaded from MinIO by Airflow.
+    schema: "{{ env_var('DBT_CLICKHOUSE_DATABASE', 'fraudguard') }}"
+    tables:
+      - name: transactions
+        description: Transaction events loaded from completed MinIO batches.
+      - name: transaction_labels
+        description: Fraud labels loaded independently from transaction events.
+      - name: ingestion_batches
+        description: Airflow ingestion manifest and batch status history.

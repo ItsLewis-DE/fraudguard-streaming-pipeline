@@ -1,6 +1,17 @@
 .venv/
+.env
+.env.airflow
+.env.dbt
 __pycache__/
 *.py[cod]
+
+# dbt runtime artifacts
+dbt/logs/
+dbt/target/
+dbt/dbt_packages/
+
+# Airflow runtime data is stored in Docker named volumes.
+airflow/logs/
 
 # The PaySim dataset is larger than GitHub's regular file limit.
 data/*.csv

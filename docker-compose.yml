@@ -1,3 +1,42 @@
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-fraudguard-airflow:3.2.2}
+  environment: &airflow-common-environment
+    AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-hgPKSTYIPpMXRW2s03MChhIa0FHLryflFNzG4FO1164=}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-2}
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: ${AIRFLOW_MAX_ACTIVE_TASKS_PER_DAG:-2}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD:-airflow}@airflow-postgres/airflow
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_JWT_SECRET:-fraudguard-local-jwt-secret-change-me}
+    AIRFLOW__API_AUTH__JWT_ISSUER: airflow
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+    # Airflow connection ID: clickhouse_http. The HTTP port is used by
+    # clickhouse-connect; 9000 is ClickHouse's native protocol port.
+    AIRFLOW_CONN_CLICKHOUSE_HTTP: >-
+      {"conn_type":"http","host":"clickhouse","port":8123,"login":"${CLICKHOUSE_USER:-fraudguard}","password":"${CLICKHOUSE_PASSWORD:-fraudguard-secret}","schema":"${CLICKHOUSE_DB:-fraudguard}"}
+    # Airflow connection ID: minio_s3. Path-style addressing is required for
+    # the local S3-compatible endpoint.
+    AIRFLOW_CONN_MINIO_S3: >-
+      {"conn_type":"aws","login":"${MINIO_AIRFLOW_USER:-fraudguard}","password":"${MINIO_AIRFLOW_PASSWORD:-fraudguard-secret}","extra":{"endpoint_url":"http://minio:9000","region_name":"us-east-1","config_kwargs":{"s3":{"addressing_style":"path"}}}}
+    AIRFLOW_CONFIG: /opt/airflow/config/airflow.cfg
+    PYTHONDONTWRITEBYTECODE: "1"
+  user: "${AIRFLOW_UID:-50000}:0"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/plugins:/opt/airflow/plugins:ro
+    - airflow_logs:/opt/airflow/logs
+    - airflow_config:/opt/airflow/config
+  depends_on: &airflow-common-depends-on
+    airflow-postgres:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
+
 services:
   kafka-init:
     image: apache/kafka:3.9.2
@@ -111,8 +150,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: fraudguard
-      MINIO_ROOT_PASSWORD: fraudguard-secret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -121,6 +160,54 @@ services:
       timeout: 5s
       retries: 12
       start_period: 15s
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/fraudguard/init_bucket.sh"]
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
+      MINIO_AIRFLOW_USER: ${MINIO_AIRFLOW_USER:-fraudguard}
+      MINIO_AIRFLOW_PASSWORD: ${MINIO_AIRFLOW_PASSWORD:-fraudguard-secret}
+    volumes:
+      - ./minIO/init_bucket.sh:/opt/fraudguard/init_bucket.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.17.56
+    container_name: clickhouse
+    hostname: clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      # MinIO already uses host port 9000, so expose ClickHouse native TCP on 9002.
+      - "9002:9000"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-fraudguard}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-fraudguard}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-fraudguard-secret}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init/01_fraudguard_schema.sql:/docker-entrypoint-initdb.d/01_fraudguard_schema.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clickhouse-client --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   spark-master:
     build:
@@ -184,6 +271,115 @@ services:
       spark-master:
         condition: service_healthy
 
+  airflow-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    shm_size: 128mb
+
+  airflow-init:
+    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        mkdir -p /opt/airflow/logs /opt/airflow/config
+        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/config
+        /entrypoint airflow version
+    environment:
+      <<: *airflow-common-environment
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+      _PIP_ADDITIONAL_REQUIREMENTS: ""
+    user: "0:0"
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    restart: unless-stopped
+    ports:
+      - "${AIRFLOW_PORT:-8084}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      # Airflow CLI needs about 10-15 seconds when the full local stack is running.
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
 volumes:
   kafka_data:
   minio_data:
+  clickhouse_data:
+  airflow_postgres_data:
+  airflow_logs:
+  airflow_config:

@@ -5,7 +5,9 @@ import csv
 import logging
 import os
 import time
+from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime,timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -19,6 +21,10 @@ DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "data.csv"
 DEFAULT_SCHEMA_REGISTRY_URL = "http://localhost:8081"
 TRANSACTION_SCHEMA_PATH = PROJECT_ROOT / "schemas" / "fraud_transaction.avsc"
 LABEL_SCHEMA_PATH = PROJECT_ROOT / "schemas" / "fraud_transaction_label.avsc"
+
+REPLAY_EPOCH = datetime(2026,1,1,tzinfo=timezone.utc)
+REPLAY_EPOCH_MS = int(REPLAY_EPOCH.timestamp() * 1000)
+STEP_DURATION_MS = 60*60*1000
 
 LOGGER = logging.getLogger("paysim-producer")
 
@@ -164,6 +170,50 @@ def build_serializers(
     )
     return transaction_serializer, label_serializer
 
+def count_rows_per_step(data_path:str) -> Counter[int]:
+    counts: Counter[int] = Counter() 
+    with data_path.open("rb") as csv_file:
+        raw_header = csv_file.readline() 
+        if not raw_header:
+            raise ValueError("file CSV rỗng!")
+        header = next(csv.reader([raw_header.decode("utf-8")]))
+        validate_header(header)
+        step_index = header.index("step")
+        for row_number,raw_row in enumerate(csv_file,start=1):
+            if not raw_row.strip():
+                continue 
+            columns = raw_row.split(b",")
+            try:
+                step = int(columns[step_index])
+            except (IndexError, ValueError) as error:
+                raise ValueError(
+                    f"Invalid step at CSV data row {row_number}"
+                ) from error
+            if step < 1:
+                raise ValueError(f"PaySim step must be >= 1, got {step}")
+            counts[step] += 1
+    if not counts:
+        raise ValueError("CSV contains no data rows")
+    return counts 
+
+def deterministic_event_time_ms(
+    *,
+    step: int,
+    ordinal_within_step: int,
+    rows_in_step: int,
+) -> int:
+    """Distribute a row deterministically inside its one-hour PaySim step."""
+    if step < 1:
+        raise ValueError(f"PaySim step must be >= 1, got {step}")
+    if rows_in_step < 1:
+        raise ValueError("rows_in_step must be >= 1")
+    if not 0 <= ordinal_within_step < rows_in_step:
+        raise ValueError(
+            "ordinal_within_step must be between 0 and rows_in_step - 1"
+        )
+
+    offset_ms = ordinal_within_step * STEP_DURATION_MS // rows_in_step
+    return REPLAY_EPOCH_MS + (step - 1) * STEP_DURATION_MS + offset_ms
 
 def validate_header(fieldnames: list[str] | None) -> None:
     actual = set(fieldnames or [])
@@ -172,18 +222,28 @@ def validate_header(fieldnames: list[str] | None) -> None:
         raise ValueError(f"CSV is missing required columns: {sorted(missing)}")
 
 def convert_paysim_row(
-    row: Mapping[str, str], row_number: int, epoch: DateTime
+    row: Mapping[str, str],
+    row_number: int,
+    *,
+    ordinal_within_step: int,
+    rows_in_step: int,
 ) -> tuple[dict[str, object], dict[str, object]]:
     
     event_id = f"paysim-{row_number:010d}"
     ingested_at = int(time.time() * 1000)
     step = int(row["step"])
+    event_time = deterministic_event_time_ms(
+        step=step,
+        ordinal_within_step=ordinal_within_step,
+        rows_in_step=rows_in_step,
+    )
 
     event = {
         "event_id": event_id,
         "source": "paysim",
         "event_time": event_time,
         "ingested_at": ingested_at,
+        "step":step,
         "type": row["type"],
         "amount": float(row["amount"]),
         "nameOrig": row["nameOrig"],
@@ -267,6 +327,8 @@ def replay_csv(
 
     stats = DeliveryStats()
     limiter = RateLimiter(events_per_second)
+    rows_per_step = count_rows_per_step(data_path)
+    ordinals_by_step: Counter[int] = Counter()
     published = 0
     started_at = time.monotonic()
 
@@ -276,13 +338,14 @@ def replay_csv(
 
         for row_number, row in enumerate(reader, start=1):
             step = int(row["step"])
-
+            ordinals_within_step = ordinals_by_step[step]
+            ordinals_by_step[step]+=1
             if row_number <= skip_rows:
                 continue
             if max_records is not None and published >= max_records:
                 break
 
-            event, label = convert_paysim_row(row, row_number)
+            event, label = convert_paysim_row(row, row_number,ordinal_within_step=ordinals_within_step,rows_in_step=rows_per_step[step])
             event_id = str(event["event_id"])
             event_value = serialize_avro(
                 transaction_serializer,

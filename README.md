@@ -79,7 +79,19 @@ uv run python producer/kafka_producer.py --events-per-second 1000
 ```
 
 Use `--events-per-second 0` for maximum throughput. The producer reads the CSV
-one row at a time, so the full dataset is not loaded into memory.
+one row at a time, so the full dataset is not loaded into memory. It first
+counts the rows in each PaySim `step`, then distributes their zero-based
+ordinals across that step's 3,600,000 milliseconds:
+
+```text
+event_time = 2026-01-01T00:00:00Z
+             + (step - 1) hours
+             + floor(ordinal_within_step * 3,600,000 / rows_in_step) ms
+```
+
+The same source row therefore keeps the same `event_id` and `event_time` on
+every replay. Only `ingested_at` reflects the current producer run. If a step
+contains exactly 3,600 rows, ordinal 120 maps to an offset of 120 seconds.
 
 Run the transaction Kafka-to-MinIO job from the read-only jobs directory
 mounted into the Spark containers:
@@ -90,7 +102,7 @@ docker compose exec spark-master \
   --master spark://spark-master:7077 \
   --deploy-mode client \
   --conf spark.cores.max=1 \
-  /opt/spark/jobs/kafka_to_minio.py
+  /opt/spark/jobs/event_kafka_minio.py
 ```
 
 In a second terminal, run the independent label landing job:
@@ -101,7 +113,7 @@ docker compose exec spark-master \
   --master spark://spark-master:7077 \
   --deploy-mode client \
   --conf spark.cores.max=1 \
-  /opt/spark/jobs/kafka_labels_to_minio.py
+  /opt/spark/jobs/labels_kafka_minio.py
 ```
 
 Both jobs share the Confluent wire-format, Schema Registry, Avro decoding,

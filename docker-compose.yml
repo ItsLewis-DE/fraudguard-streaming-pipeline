@@ -18,7 +18,7 @@ x-airflow-common: &airflow-common
     # Airflow connection ID: clickhouse_http. The HTTP port is used by
     # clickhouse-connect; 9000 is ClickHouse's native protocol port.
     AIRFLOW_CONN_CLICKHOUSE_HTTP: >-
-      {"conn_type":"http","host":"clickhouse","port":8123,"login":"${CLICKHOUSE_USER:-fraudguard}","password":"${CLICKHOUSE_PASSWORD:-fraudguard-secret}","schema":"${CLICKHOUSE_DB:-fraudguard}"}
+      {"conn_type":"http","host":"clickhouse","port":8123,"login":"${CLICKHOUSE_LOADER_USER:-fraudguard_loader}","password":"${CLICKHOUSE_LOADER_PASSWORD:?CLICKHOUSE_LOADER_PASSWORD must be set}","schema":"fraudguard"}
     # Airflow connection ID: minio_s3. Path-style addressing is required for
     # the local S3-compatible endpoint.
     AIRFLOW_CONN_MINIO_S3: >-
@@ -193,9 +193,14 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-fraudguard}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-fraudguard-secret}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_LOADER_PASSWORD: ${CLICKHOUSE_LOADER_PASSWORD:?CLICKHOUSE_LOADER_PASSWORD must be set}
+      CLICKHOUSE_TRANSFORMER_PASSWORD: ${DBT_CLICKHOUSE_PASSWORD:?DBT_CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_SUPERSET_PASSWORD: ${CLICKHOUSE_SUPERSET_PASSWORD:?CLICKHOUSE_SUPERSET_PASSWORD must be set}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init/01_fraudguard_schema.sql:/docker-entrypoint-initdb.d/01_fraudguard_schema.sql:ro
+      - ./clickhouse/init/02_init_role_database.sql:/docker-entrypoint-initdb.d/02_init_role_database.sql:ro
+      - ./clickhouse/init/03_init_role_users.sh:/docker-entrypoint-initdb.d/03_init_role_users.sh:ro
     ulimits:
       nofile:
         soft: 262144

@@ -19,4 +19,22 @@ clean-targets:
 
 models:
   fraudguard:
-    +materialized: view
+    staging:
+      +schema: staging
+      +materialized: view
+      +tags: ["staging"]
+
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+      +tags: ["intermediate"]
+
+    marts:
+      +schema: mart
+      +materialized: table
+      +tags: ["superset", "analytics"]
+
+    monitoring:
+      +schema: monitoring
+      +materialized: table
+      +tags: ["superset", "monitoring"]

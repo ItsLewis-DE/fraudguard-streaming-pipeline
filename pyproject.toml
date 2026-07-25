@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ml-fraud-banking"
 version = "0.1.0"
@@ -6,9 +10,100 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "confluent-kafka[avro]>=2.15.0",
+    "psutil>=7,<8",
+    "pydantic>=2.12,<3",
+    "pyyaml>=6,<7",
 ]
+
+[project.scripts]
+fraudguard = "fraudguard_ml.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "ml/src"}
+
+[tool.setuptools.packages.find]
+where = ["ml/src"]
+include = ["fraudguard_ml*"]
 
 [dependency-groups]
 dev = [
     "dbt-clickhouse==1.10.1",
+    "mypy>=1.17,<2",
+    "pre-commit>=4,<5",
+    "pytest>=8,<10",
+    "pytest-cov>=6,<8",
+    "ruff>=0.12,<1",
+    "types-psutil>=7,<8",
+    "types-pyyaml>=6,<7",
 ]
+
+#pydantic: dùng để kiểm tra và xác thực dữ liệu (data validation)
+#PyYAML: Thư viện này giúp Python có thể đọc và ghi các file cấu hình đuôi .yml hoặc .yaml.
+#psutil: Công cụ giúp theo dõi tài nguyên hệ thống. Nó có thể lấy thông tin về CPU, RAM, ổ cứng và các tiến trình đang chạy.
+#ruff: Một công cụ dọn dẹp code (linter & formatter) siêu tốc. Nó sẽ tự động quét mã nguồn của bạn để tìm ra các lỗi cú pháp, những chỗ viết code chưa tối ưu, và tự động căn lề, sửa lại định dạng cho đẹp mắt và chuẩn chỉnh.
+#mypy: Công cụ kiểm tra kiểu dữ liệu tĩnh. Nó hoạt động giống như một chiếc kính lúp, quét qua code của bạn và phát hiện sớm những lỗi ngớ ngẩn (ví dụ: bạn đang cố cộng một con số với một chữ cái) ngay từ lúc đang viết code, thay vì đợi lúc chạy thử mới phát hiện ra.
+#pytest: Framework nổi tiếng nhất để viết các kịch bản kiểm thử (unit tests). Bạn dùng nó để tạo ra các bài test giả lập, đảm bảo từng hàm trong code của bạn luôn trả về kết quả đúng như kỳ vọng.
+#pytest-cov: Một tiện ích mở rộng của pytest. Nó giúp đo lường độ bao phủ code (coverage), báo cho bạn biết chính xác có bao nhiêu phần trăm (ví dụ: 85%) mã nguồn đã được chạy qua các bài test, và những dòng code nào đang bị bỏ sót.
+#pre-commit: Người gác cổng nghiêm ngặt. Công cụ này sẽ tự động kích hoạt các bài kiểm tra (như ruff, mypy) ngay khi bạn gõ lệnh git commit. Nếu code của bạn có lỗi lặt vặt hoặc chưa đúng chuẩn, nó sẽ chặn lại, không cho phép bạn lưu lên kho chứa (repository).
+#types-PyYAML & types-psutil: Bản thân hai thư viện PyYAML và psutil được viết ra mà không có sẵn các định nghĩa chuẩn về kiểu dữ liệu (type hints). Hai gói types-* này đóng vai trò như những "cuốn từ điển" phụ trợ, cung cấp thông tin để thằng mypy ở trên có thể hiểu và kiểm tra lỗi chính xác khi bạn làm việc với YAML và tiến trình hệ thống.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["ml/src"]
+extend-exclude = [
+    "data",
+    "dbt/target",
+    "dbt/logs",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", #Kiểm tra lỗi về phong cách viết code theo pycodestyle, như khoảng trắng và độ dài dòng
+    "F", #Tìm lỗi Python phổ biến như import không dùng, biến chưa định nghĩa.
+    "I", #Kiểm tra và sắp xếp import.
+    "B", #Tìm những cách viết dễ gây bug, từ bộ luật flake8-bugbear
+    "UP", #Gợi ý nâng cấp code sang cú pháp Python hiện đại hơn.
+    "SIM",#Gợi ý đơn giản hóa code dài hoặc rườm rà.
+    "RUF", #Các luật riêng của Ruff, phát hiện thêm những lỗi và cách viết không an toàn.
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+    "ml/src/fraudguard_ml",
+    "ml/tests",
+]
+strict = true
+warn_unreachable = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "--cov=ml/src/fraudguard_ml",   # Chỉ đo coverage trong thư mục code nghiệp vụ
+    "--cov-report=html",            # Xuất thêm một báo cáo dạng web (HTML) dễ nhìn
+    "--cov-fail-under=80",          # Đánh rớt (Fail) toàn bộ quá trình test nếu coverage dưới 80%
+]
+testpaths = ["ml/tests"]
+markers = [
+    "smoke: service-free package and configuration checks",
+    "integration: requires one or more local services",
+    "gpu: requires a usable CUDA backend",
+]
+[tool.coverage.run]
+source = ["ml/src/fraudguard_ml"]
+branch = true  # Bật chế độ đo bao phủ nhánh (Branch coverage)
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true # Bỏ qua các file rỗng (như __init__.py) khỏi kết quả

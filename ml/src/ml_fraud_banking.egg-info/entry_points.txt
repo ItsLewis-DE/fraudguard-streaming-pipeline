@@ -1,0 +1,2 @@
+[console_scripts]
+fraudguard = fraudguard_ml.cli:main

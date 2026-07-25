@@ -1,0 +1,4 @@
+confluent-kafka[avro]>=2.15.0
+psutil<8,>=7
+pydantic<3,>=2.12
+pyyaml<7,>=6

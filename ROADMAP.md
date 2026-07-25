@@ -1,1316 +1,1210 @@
-# FraudGuard: ClickHouse-centric Data Engineering & MLOps Roadmap
+# FraudGuard — ML-first Implementation Roadmap
 
-> Phiên bản 1.0 — cập nhật ngày 22/07/2026  
-> Mục tiêu: portfolio Data Engineering/MLOps chạy local, kiểm soát chi phí và thể hiện rõ data lineage, reproducibility, model governance và monitoring.
+> Phiên bản 2.0 — cập nhật ngày 24/07/2026
+> Phạm vi: chỉ mô tả công việc tiếp theo của dự án, không lặp lại lịch sử triển
+> khai.
+> Mục tiêu: học Machine Learning một cách có hệ thống, đặc biệt là feature
+> engineering và hyperparameter tuning, đồng thời giữ tiêu chuẩn của một dự án
+> Data/ML Engineering chuyên nghiệp chạy hoàn toàn local và miễn phí.
 
-## 1. Tóm tắt quyết định kiến trúc
+## 1. Định hướng đã chốt
 
-FraudGuard là pipeline phát hiện gian lận batch-first trên dữ liệu PaySim synthetic. Kiến trúc duy nhất của dự án:
+### 1.1 Hồ sơ dự án
 
-1. Python producer replay PaySim vào Kafka bằng Avro.
-2. Spark Structured Streaming kiểm tra contract, giải mã và landing Parquet vào MinIO.
-3. Loader idempotent nạp trực tiếp Parquet từ MinIO vào ClickHouse.
-4. dbt Core với `dbt-clickhouse` quản lý RAW → CORE → FEATURE → MART, tests, documentation và lineage.
-5. Feature definitions được version hóa trong Git; training datasets là immutable snapshots có manifest và hash.
-6. Python huấn luyện model ngoài ClickHouse bằng scikit-learn/XGBoost hoặc LightGBM.
-7. MLflow là nguồn sự thật duy nhất cho experiment tracking và Model Registry; PostgreSQL giữ metadata, MinIO giữ artifacts.
-8. Optuna điều phối tuning; SHAP tạo global và local explanations.
-9. Python batch scorer tải exact model version từ MLflow Registry, đọc feature từ ClickHouse và ghi score/alert trở lại ClickHouse.
-10. Python + dbt tạo monitoring metrics; Superset chỉ đọc MART và MONITORING.
+FraudGuard được phát triển như một hệ thống ưu tiên điều tra gian lận theo batch,
+không phải hệ thống tự động chặn giao dịch real-time.
 
-Kiến trúc này cố ý không thêm Feast, Airflow, Flink, Iceberg, Redis, Kubernetes, deep learning hoặc online inference trong phiên bản đầu.
-
-Nguyên tắc xuyên suốt:
+Đầu ra chính của hệ thống là:
 
 ```text
-CONTRACT
-  → LAND
-  → RECONCILE
-  → DBT TEST
-  → SNAPSHOT
-  → TRAIN
-  → EVALUATE
-  → REGISTER
-  → SCORE
-  → MONITOR
-  → VISUALIZE
+transaction
+  → point-in-time features
+  → calibrated fraud risk score
+  → alert policy theo capacity
+  → business-safe reason codes
+  → case investigation
+  → local LLM case summary
+  → delayed analyst/label feedback
+  → model monitoring
 ```
 
-## 2. Mục tiêu và tiêu chí thành công
+Trọng tâm thực thi:
 
-### 2.1 Câu hỏi sản phẩm
+- khoảng 65% cho feature engineering, training, evaluation, tuning và
+  explainability;
+- khoảng 25% cho data quality, reproducibility, orchestration và model
+  lifecycle;
+- khoảng 10% cho Streamlit và local LLM copilot.
 
-Với ngân sách điều tra hữu hạn, giao dịch nào cần được ưu tiên để thu hồi nhiều fraud nhất mà vẫn kiểm soát false positive và số alert mỗi giờ?
+Định hướng nghề nghiệp của portfolio là cân bằng nhưng hơi nghiêng về Data
+Engineering. Vì vậy mọi thí nghiệm ML phải truy được về dữ liệu, feature,
+config, code và model artifact; không chấp nhận notebook-only project.
 
-Đây là bài toán **ranking + decision policy**, không chỉ là classification:
+### 1.2 Ràng buộc
 
-- model tạo risk score;
-- policy chuyển score thành alert theo threshold/top-k và capacity;
-- analyst xem queue, reason code và performance;
-- delayed labels đánh giá model theo cohort thời gian.
+- Chạy local trên 16 CPU, khoảng 8 GB RAM và NVIDIA RTX 3050 4 GB.
+- Không dùng dịch vụ cloud hoặc API trả phí.
+- Dataset PaySim có khoảng 6,36 triệu dòng; không giả định toàn bộ DataFrame luôn
+  nằm vừa trong RAM cùng lúc.
+- Docker services chạy trong WSL/Docker Desktop; training ưu tiên chạy từ host
+  bằng `uv` để dễ kiểm soát CPU/GPU.
+- Batch inference là bắt buộc. Online feature store, low-latency API và
+  Kubernetes không thuộc active roadmap.
+- Deep learning và LLM là bắt buộc để học và demo, nhưng không được ưu ái khi
+  chọn champion. Model tốt nhất phải thắng bằng evidence.
 
-### 2.2 Mục tiêu portfolio
+### 1.3 Prediction semantics
 
-Dự án phải chứng minh được:
+- Grain: một `event_id` tương ứng một giao dịch.
+- Prediction time: sau khi transaction event đã được ghi nhận, trước khi analyst
+  bắt đầu điều tra.
+- Business action: xếp hạng và ưu tiên case, không tự động từ chối giao dịch.
+- Target chính: `is_fraud`.
+- `is_flagged_fraud` chỉ dùng để phân tích rule hiện có; không được dùng làm
+  feature.
+- Label chỉ hợp lệ tại một cutoff nếu `observed_at <= cutoff`.
+- Model tạo score; policy độc lập chuyển score thành alert.
 
-- thiết kế event contract và schema evolution;
-- streaming landing có quarantine và replayability;
-- ingestion idempotent và lineage từ file tới prediction;
-- mô hình dữ liệu ClickHouse phù hợp workload OLAP;
-- transformation/test/documentation bằng dbt;
-- feature point-in-time correct và không leakage;
-- training/evaluation tái lập được;
-- model promotion, rollback và batch inference có kiểm soát;
-- delayed-label evaluation, drift và data quality monitoring;
-- dashboard chỉ đọc semantic marts đã được kiểm thử.
+## 2. Tech stack cho giai đoạn tiếp theo
 
-### 2.3 Tiêu chí thành công phiên bản đầu
+### 2.1 Stack được chọn
 
-- Replay ít nhất 100.000 giao dịch không mất event hợp lệ.
-- Reconcile được Kafka offsets, MinIO objects và ClickHouse rows.
-- Transaction inference contract không chứa label.
-- Training/validation/test split hoàn toàn theo thời gian.
-- Có Dummy, rule và Logistic Regression baseline; có ít nhất một tree-based challenger.
-- Chọn model bằng AUPRC và recall/precision tại alert budget, không dùng accuracy.
-- Có calibration report và policy version riêng với model version.
-- Mọi training run truy được về dataset snapshot, dbt manifest và Git SHA.
-- MLflow Registry quản lý aliases `candidate`, `challenger`, `champion` và rollback.
-- Batch scoring ghi exact model, feature, dataset và policy version.
-- Superset có dashboard pipeline, fraud operations, model performance và drift.
-- Toàn bộ pipeline chạy lại bằng command rõ ràng; secret không nằm trong Git.
-
-### 2.4 Ngoài phạm vi phiên bản đầu
-
-- Quyết định tài chính production hoặc tuyên bố business impact trên dữ liệu ngân hàng thật.
-- Online scoring dưới 100 ms.
-- Online feature store hoặc REST inference service.
-- Auto-retraining hoặc auto-promotion không có người duyệt.
-- Exactly-once end-to-end tuyệt đối.
-- Multi-node ClickHouse cluster, high availability hoặc multi-region.
-- Kubernetes và distributed training.
-
-## 3. Hiện trạng repository
-
-### 3.1 Đã có
-
-| Thành phần | Trạng thái | Bằng chứng |
+| Nhu cầu | Công nghệ | Vai trò |
 |---|---|---|
-| PaySim producer | Replay có rate control, backpressure và Kafka idempotence | `producer/kafka_producer.py` |
-| Kafka | KRaft single-node, 3 partitions/topic, auto-create tắt | `docker-compose.yml` |
-| Schema Registry | Confluent Schema Registry | `docker-compose.yml` |
-| Data contract | Transaction và label là hai Avro schemas | `schemas/*.avsc` |
-| Label isolation | Transaction không chứa `isFraud`/`isFlaggedFraud` | `schemas/fraud_transaction.avsc` |
-| Spark landing | Validate Confluent header/schema ID và decode Avro | `spark/jobs/kafka_to_minio.py` |
-| Quarantine | Lưu message lỗi cùng error code | `spark/jobs/kafka_to_minio.py` |
-| MinIO | Valid, quarantine và checkpoint buckets | `minIO/init_bucket.sh` |
+| Dependency/runtime | Python 3.12, `uv` | Môi trường tái lập |
+| SQL feature layer | ClickHouse, dbt-clickhouse | Point-in-time features và data tests |
+| Dataset I/O | Parquet, PyArrow, Polars Lazy API | Snapshot và xử lý tiết kiệm RAM |
+| Data contracts | Pandera, Pydantic | Feature schema, config và output validation |
+| ML nền tảng | NumPy, scikit-learn | Pipeline, baseline, metrics, calibration |
+| Tree challengers | HistGradientBoosting, XGBoost, LightGBM, CatBoost | Benchmark nhiều model family |
+| Deep learning | PyTorch | Tabular MLP challenger |
+| Imbalance experiments | class/sample weights; `imbalanced-learn` chỉ cho lab | Học imbalance có kiểm soát |
+| Tuning | Optuna | Search space, pruning, resumable studies |
+| Tracking/registry | MLflow, PostgreSQL, MinIO | Run, artifact, dataset và model version |
+| Explainability | SHAP | Global/local attribution và reason codes |
+| Local LLM | Ollama + một small instruct model quantized | Fraud Case Copilot miễn phí |
+| ML application | Streamlit, Plotly | Model comparison và case investigation |
+| Tests | pytest, dbt tests | Unit, contract, temporal và integration tests |
+| Code quality | Ruff, mypy, pre-commit | Lint, format và static checks |
+| CI | GitHub Actions | Fast checks không cần full local stack |
 
-### 3.2 Khoảng trống theo thứ tự ưu tiên
+### 2.2 Quy tắc sử dụng stack
 
-| Khoảng trống | Ảnh hưởng | Ưu tiên |
+- Polars dùng `scan_parquet`/lazy execution cho snapshot; chỉ chuyển dữ liệu cần
+  thiết sang NumPy/pandas tại boundary của thư viện ML.
+- scikit-learn cung cấp preprocessing/evaluation contract chung. Wrapper của
+  XGBoost, LightGBM và CatBoost phải trả cùng prediction schema.
+- Không tuning tất cả model bằng search space lớn. Benchmark hẹp trước, sau đó
+  chỉ tune tối đa hai model tree tốt nhất và một PyTorch challenger.
+- MLflow phải được dùng từ baseline đầu tiên, không thêm vào sau khi thí nghiệm
+  đã kết thúc.
+- PyTorch dùng mini-batch, early stopping và automatic mixed precision khi CUDA
+  ổn định. Không đưa toàn bộ dataset lên VRAM.
+- Ollama chỉ sinh bản tóm tắt từ evidence đã được truy xuất. LLM không tạo fraud
+  score, không sửa model decision và không truy cập raw account identifier.
+- Streamlit là giao diện duy nhất trong active roadmap. Superset được hoãn; chỉ
+  xem xét lại khi monitoring marts đã ổn định và cần BI chuyên dụng.
+
+### 2.3 Công nghệ cố ý chưa dùng
+
+- Không dùng Feast: feature definitions và offline batch features chưa cần
+  online store.
+- Không dùng Spark MLlib: mục tiêu là học Python ML ecosystem và model vừa với
+  single-machine sau khi materialize features.
+- Không dùng distributed training, Ray, Dask hoặc Kubernetes.
+- Không dùng LangChain/LlamaIndex: copilot chưa cần agent framework.
+- Không dùng vector database/RAG: hiện chưa có document corpus cần semantic
+  retrieval.
+- Không fine-tune LLM: 4 GB VRAM không phù hợp và không tạo đủ giá trị cho bài
+  toán này.
+- Không dùng GNN trên full transaction graph trong phiên bản này. Point-in-time
+  graph features phải được chứng minh trước.
+
+## 3. Nguyên tắc học và triển khai
+
+Mỗi milestone phải trả lời đủ bốn câu hỏi:
+
+1. Kiến thức nào cần hiểu trước khi code?
+2. Artifact nào sẽ được tạo?
+3. Làm sao chứng minh artifact đúng?
+4. Kết quả học được ghi lại ở đâu?
+
+Notebook được phép dùng cho EDA và learning experiments. Logic dùng để train,
+evaluate, tune, explain hoặc score phải nằm trong importable package và có test.
+
+Ba cấp dữ liệu được dùng xuyên suốt:
+
+| Cấp | Mục đích | Được dùng để kết luận model? |
 |---|---|---|
-| Chưa có deterministic `event_time` | Không thể làm temporal ML đáng tin cậy | P0 |
-| Label chưa có delay thực và chưa landing riêng | Không mô phỏng delayed feedback | P0 |
-| Chưa có end-to-end deduplication contract | Replay có thể tạo duplicate business row | P0 |
-| Chưa có ClickHouse service/schema | Chưa có warehouse/analytics layer | P0 |
-| Chưa có MinIO → ClickHouse loader | Chưa có ingestion lineage/reconciliation | P0 |
-| Chưa có dbt project | Transformation/test/lineage chưa được quản lý | P0 |
-| Chưa có point-in-time features/snapshot | Chưa thể train model hợp lệ | P0 |
-| Chưa có ML package và evaluation suite | Chưa có baseline | P0 |
-| Chưa có MLflow/Optuna/SHAP | Chưa có reproducible MLOps | P1 |
-| Chưa có scorer/monitoring/Superset | Chưa có production-like demo | P1 |
-| Credentials local còn hard-code | Không phù hợp repo chia sẻ | P1 |
+| Smoke | Chạy nhanh contract/test, fixed hash sample nhỏ | Không |
+| Benchmark | So sánh model/feature nhanh, validation giữ prevalence tự nhiên | Chỉ để shortlist |
+| Final | Full immutable snapshot | Có |
 
-## 4. Kiến trúc đích
+Mọi báo cáo phải phân biệt:
 
-```mermaid
-flowchart LR
-    A[PaySim CSV] --> B[Python replay producer]
-    B --> C[(Kafka transactions)]
-    B --> D[(Kafka delayed labels)]
-    C --> E[Spark transaction landing]
-    D --> F[Spark label landing]
-    E --> G[(MinIO transactions)]
-    E --> H[(MinIO quarantine)]
-    F --> I[(MinIO labels)]
-    G --> J[Idempotent loader]
-    H --> J
-    I --> J
-    J --> K[(ClickHouse RAW)]
-    K --> L[dbt build and tests]
-    L --> M[(CORE)]
-    L --> N[(FEATURE)]
-    N --> O[(Immutable training snapshot)]
-    O --> P[Python training]
-    P --> Q[Optuna and SHAP]
-    P --> R[(MLflow Tracking and Registry)]
-    R --> S{Quality and approval gate}
-    S --> T[Python batch scorer]
-    N --> T
-    T --> U[(Scores alerts explanations)]
-    U --> V[Python and dbt monitoring]
-    M --> W[(MART)]
-    V --> W
-    W --> X[Superset]
-```
+- kết quả trên smoke/benchmark/final;
+- observation, inference và recommendation;
+- performance model và performance decision policy;
+- metric trên label đã mature và label chưa mature.
 
-### 4.1 Ranh giới trách nhiệm
-
-| Lớp | Trách nhiệm | Không chịu trách nhiệm |
-|---|---|---|
-| Kafka + Schema Registry | Event log, partition ordering, contract compatibility | Feature engineering, model scoring |
-| Spark | Validate/decode, route valid/quarantine, landing Parquet, checkpoint offsets | Business features, training |
-| MinIO | Immutable landing, recovery boundary, training snapshots, ML artifacts | Business SQL, model metadata |
-| ClickHouse | OLAP storage, transformations, feature computation, score/monitoring tables | Experiment tracking, registry, Python training |
-| dbt | SQL DAG, tests, docs, manifest, data contracts | Ingestion, model fitting, serving |
-| Python ML | Dataset validation, training, tuning, evaluation, scoring, monitoring calculations | Data warehouse governance |
-| MLflow | Experiments, artifacts metadata, registered models, aliases, approvals | Feature computation, BI marts |
-| PostgreSQL | Durable metadata backend cho MLflow và Superset | Fraud analytics |
-| Superset | Visualization trên approved marts | Business transformation logic |
-
-### 4.2 Nguồn sự thật cho từng artifact
-
-| Artifact | Nguồn sự thật |
-|---|---|
-| Event schema | Avro files trong Git + Schema Registry |
-| Raw/replay data | MinIO object + ETag |
-| Ingestion state | ClickHouse `monitoring.ingestion_file_audit` |
-| SQL transformation | Git + dbt manifest |
-| Feature definition | dbt SQL + feature contract YAML |
-| Training data | Immutable snapshot manifest + Parquet hash |
-| Experiment | MLflow run |
-| Approved model | MLflow registered model version |
-| Active deployment | MLflow model alias |
-| Prediction history | ClickHouse `ml.transaction_scores` |
-| Decision policy | Versioned policy config trong Git + score record |
-| Monitoring metrics | ClickHouse MONITORING models |
-
-## 5. Data contract và temporal semantics
-
-### 5.1 Transaction schema v2
-
-Thêm theo backward-compatible evolution:
-
-| Field | Kiểu | Ý nghĩa |
-|---|---|---|
-| `event_time` | timestamp-millis | Thời gian giao dịch deterministic |
-| `source_row_number` | long | Vị trí dòng trong source |
-| `source_file_sha256` | string/null | Fingerprint dataset |
-| `event_sequence` | long | Tie-break khi cùng timestamp |
-| `amount_minor` | long/null | Monetary value dạng minor unit |
-
-Không đổi trực tiếp `amount: double`. Thêm field mới, dual-read trong migration window rồi mới deprecate field cũ.
-
-### 5.2 Deterministic event time
-
-1. Chọn epoch cố định, ví dụ `2026-01-01T00:00:00Z`.
-2. Mỗi PaySim `step` tương ứng một giờ.
-3. Phân bố `ordinal_within_step` ổn định trong 3.600 giây.
-4. Dùng `source_row_number` làm `event_sequence`.
-5. Replay cùng source luôn tạo cùng `event_id`, `event_time` và `event_sequence`.
-
-Không dùng thời gian chạy producer làm event time.
-
-### 5.3 Delayed label
-
-Label contract tối thiểu:
-
-```text
-event_id
-label
-label_source
-observed_at
-label_version
-```
-
-Transaction và label phải được publish bằng hai schedule độc lập. Mặc định local:
-
-- deterministic delay từ 1–24 giờ dựa trên hash của `event_id`;
-- correction được append bằng `label_version` cao hơn;
-- tại cutoff chỉ dùng label có `observed_at <= cutoff`.
-
-### 5.4 Inference allowlist/denylist
-
-Tuyệt đối không dùng:
-
-- `isFraud`, `isFlaggedFraud` hoặc output của rule tương đương;
-- post-investigation fields;
-- future transaction/future aggregates;
-- raw account ID như categorical shortcut;
-- post-transaction balance nếu problem statement là pre-authorization.
-
-Feature allowlist và denylist phải được version hóa trước khi mở test set.
-
-## 6. MinIO landing zone
-
-### 6.1 Buckets
-
-| Bucket | Mục đích |
-|---|---|
-| `fraud-transactions` | Valid transaction Parquet |
-| `fraud-transactions-quarantine` | Invalid payload + error metadata |
-| `fraud-transactions-checkpoint` | Spark checkpoint; không ingest |
-| `fraud-transaction-labels` | Delayed labels Parquet |
-| `fraud-transaction-labels-quarantine` | Invalid label payload + error metadata |
-| `fraud-transaction-labels-checkpoint` | Label landing checkpoint |
-| `fraud-training-snapshots` | Immutable datasets + manifests |
-| `mlflow-artifacts` | Model, plots, SHAP, evaluation, model card |
-
-### 6.2 Object layout
-
-```text
-s3://fraud-transactions/
-  event_date=2026-01-03/
-    batch_id=00000000000000000042/
-      part-....snappy.parquet
-
-s3://fraud-transaction-labels/
-  observed_date=2026-01-04/
-    batch_id=00000000000000000017/
-      part-....snappy.parquet
-
-s3://fraud-training-snapshots/
-  dataset=fraud_training/
-    version=20260722_feature_v1_split_v1/
-      data-....parquet
-      manifest.json
-```
-
-### 6.3 Row metadata bắt buộc
-
-- Kafka topic, partition, offset và timestamp;
-- writer/reader schema ID;
-- Spark batch ID;
-- event, ingest và processed time;
-- source file hash và row number;
-- pipeline version/Git SHA nếu có.
-
-MinIO objects không bị sửa sau khi landing. Correction tạo object/event version mới.
-
-## 7. ClickHouse foundation
-
-### 7.1 Databases
-
-```text
-fraudguard_raw
-fraudguard_core
-fraudguard_feature
-fraudguard_ml
-fraudguard_mart
-fraudguard_monitoring
-```
-
-Tên database được tách rõ để cấp quyền tối thiểu và tránh Superset đọc raw/label trực tiếp.
-
-### 7.2 Table engine strategy
-
-| Lớp | Engine mặc định | Lý do |
-|---|---|---|
-| RAW events | `MergeTree` | Append-only source history |
-| Label history | `MergeTree` | Giữ mọi correction/version |
-| Canonical CORE | `ReplacingMergeTree(version)` hoặc `argMax` view | Chọn record canonical có quy tắc |
-| Features | `MergeTree` | Time-series analytical reads |
-| Immutable snapshots | `MergeTree` + Parquet snapshot | Reproducible training |
-| Scores/alerts | `MergeTree` | Không overwrite lịch sử |
-| Daily marts | `SummingMergeTree`/`AggregatingMergeTree` khi có bằng chứng | Pre-aggregation có kiểm soát |
-
-Không dựa vào background merge để bảo đảm uniqueness. Query/gate cần canonical correctness phải dùng một trong các cách đã kiểm thử:
-
-- `argMax` theo version/offset;
-- canonical materialized table;
-- `FINAL` trên phạm vi bounded khi phù hợp.
-
-Không chạy `OPTIMIZE TABLE ... FINAL` định kỳ như một cơ chế deduplication.
-
-### 7.3 Sorting và partitioning
-
-Nguyên tắc:
-
-- `ORDER BY` dựa trên query pattern, không chỉ primary key logic;
-- ưu tiên lọc theo event date/time, entity và event ID;
-- partition theo tháng hoặc không partition cho bảng nhỏ;
-- không partition theo account, batch ID hoặc dataset version có cardinality cao;
-- batch insert đủ lớn để tránh quá nhiều parts nhỏ.
-
-Mọi DDL phải có comment nêu grain, engine, sorting key, partition key, retention và deduplication semantics.
-
-### 7.4 Roles
-
-```text
-fraudguard_loader
-fraudguard_transformer
-fraudguard_ml
-fraudguard_superset
-fraudguard_admin
-```
-
-- Loader chỉ insert RAW và ghi ingestion audit.
-- Transformer đọc RAW, ghi CORE/FEATURE/MART/MONITORING.
-- ML đọc FEATURE, ghi ML/MONITORING.
-- Superset chỉ SELECT MART/MONITORING và masked alert detail.
-- Automation không dùng admin user.
-
-## 8. MinIO → ClickHouse loader
-
-### 8.1 Luồng nạp
-
-```text
-List MinIO objects
-  → filter Parquet objects
-  → compare bucket/key/ETag with audit
-  → validate size and Parquet footer
-  → INSERT SELECT FROM s3(..., 'Parquet')
-  → reconcile parsed/loaded rows
-  → write audit status
-```
-
-Không download file xuống local và không tạo staging copy thứ hai.
-
-### 8.2 Ingestion audit
-
-`fraudguard_monitoring.ingestion_file_audit`:
-
-```text
-source_bucket
-object_key
-object_etag
-object_size
-dataset_type
-discovered_at
-load_started_at
-loaded_at
-clickhouse_query_id
-rows_parsed
-rows_loaded
-min_event_time
-max_event_time
-status
-error_class
-error_message_sanitized
-loader_version
-```
-
-Logical unique key: `(source_bucket, object_key, object_etag)`.
-
-### 8.3 Idempotency contract
-
-- Loader kiểm tra audit trước khi insert.
-- Mỗi attempt có deterministic `insert_deduplication_token` khi driver hỗ trợ và đã được integration-test.
-- Crash sau insert nhưng trước audit phải được reconcile bằng query ID, source object columns và row count.
-- RAW lưu `source_bucket`, `source_object_key`, `source_object_etag` trong mỗi row.
-- CORE vẫn deduplicate theo business key; loader idempotency không thay business deduplication.
-- Không retry vô hạn contract error/corrupt Parquet.
-
-### 8.4 Tần suất
-
-Phiên bản đầu chạy micro-batch mỗi 1–5 phút bằng command self-terminating. Chưa cần ingest Kafka trực tiếp vào ClickHouse vì MinIO là recovery boundary đã chọn.
-
-## 9. dbt-clickhouse transformation layer
-
-### 9.1 Phạm vi
-
-dbt chịu trách nhiệm:
-
-- khai báo RAW tables là sources;
-- cast/normalize trong STAGING;
-- canonicalize/deduplicate trong CORE;
-- xây point-in-time feature inputs;
-- materialize training spine và dataset metadata;
-- tạo MART/MONITORING cho Superset;
-- tests, descriptions, exposures và build artifacts.
-
-dbt không đọc MinIO, train model hoặc gọi MLflow Registry.
-
-### 9.2 Cấu trúc
-
-```text
-dbt/fraudguard/
-├── dbt_project.yml
-├── packages.yml
-├── macros/
-│   ├── canonical_event.sql
-│   ├── safe_divide.sql
-│   └── point_in_time_assertions.sql
-├── models/
-│   ├── staging/
-│   ├── core/
-│   ├── features/
-│   ├── marts/
-│   └── monitoring/
-├── tests/
-├── seeds/
-└── snapshots/
-```
-
-### 9.3 Modeling rules
-
-- STAGING: rename/cast/null normalization; không business aggregation.
-- CORE: typed, canonical, stable grain, lineage đầy đủ.
-- FEATURE: chỉ lịch sử trước event hiện tại; không join label trừ training spine.
-- MART: metric có định nghĩa duy nhất và owner.
-- MONITORING: data quality, drift, delayed-label performance và SLO.
-- Không dùng `SELECT *` trong contracted model.
-- Schema change mặc định fail cho model phục vụ training/scoring.
-
-### 9.4 Tests bắt buộc
-
-- Event ID non-null và canonical unique.
-- Enum transaction type hợp lệ.
-- Amount finite, range hợp lệ.
-- Transaction inference relation không có label.
-- `event_time` không vượt allowed ingest tolerance.
-- `observed_at >= event_time`.
-- Feature timestamp không vượt spine event time.
-- Current event không tự đếm trong history.
-- Future event không đổi feature quá khứ.
-- CORE count reconcile với RAW distinct business keys.
-- Superset exposures chỉ phụ thuộc MART/MONITORING.
-
-CI lưu `manifest.json`, `run_results.json` và hash tương ứng.
-
-## 10. Feature engineering và dataset snapshots
-
-### 10.1 Feature groups V1
-
-**Transaction**
-
-- transaction type;
-- `log1p(amount)`;
-- origin/destination pre-transaction balance;
-- amount/balance ratios có safe divide;
-- balance inconsistency flags;
-- hour-of-day/day index.
-
-**Origin velocity**
-
-- count/sum/max trong 1h, 6h, 24h;
-- transfer/cash-out count;
-- unique destinations;
-- amount so với historical mean/median;
-- seconds since previous transaction.
-
-**Destination velocity**
-
-- incoming count/sum trong 1h/24h;
-- unique origins;
-- new-origin count;
-- seconds since previous receipt.
-
-**Pattern**
-
-- transfer → cash-out sequence;
-- burst indicator;
-- repeated round amount;
-- new counterparty;
-- amount spike.
-
-### 10.2 Point-in-time rule
-
-Với transaction hiện tại `(event_time=t, event_sequence=s)`, history hợp lệ chỉ gồm:
-
-```text
-(historical_event_time, historical_event_sequence) < (t, s)
-```
-
-Tất cả rolling/ASOF logic phải có golden fixture kiểm tra boundary, tie-break và out-of-order events.
-
-### 10.3 Feature contract
-
-Mỗi feature group có file YAML trong Git:
-
-```text
-name
-version
-owner
-entity_keys
-timestamp_column
-feature columns and types
-null/default policy
-semantic description
-availability at inference
-source dbt models
-freshness expectation
-deprecation policy
-```
-
-Thay đổi logic, window, unit, null policy hoặc availability phải tạo feature version mới.
-
-### 10.4 Immutable training snapshot
-
-Training spine gồm:
-
-```text
-event_id
-event_time
-event_sequence
-entity keys
-label
-label_observed_at
-training_cutoff
-split_name
-dataset_version
-```
-
-Snapshot procedure:
-
-1. Chốt feature/split/label policy versions.
-2. Chạy `dbt build --select tag:ml_gate`.
-3. Materialize dataset version trong ClickHouse.
-4. Kiểm tra row count, nulls, min/max time, positive count và feature schema.
-5. Export Parquet sang MinIO.
-6. Tạo `manifest.json` chứa object hashes, query hash, dbt manifest hash và Git SHA.
-7. Đánh dấu dataset immutable; rebuild cùng input phải tạo cùng content hash trong tolerance đã định.
-
-Training luôn đọc exact snapshot version, không đọc một mutable feature view trực tiếp.
-
-## 11. ML training và evaluation
-
-### 11.1 Package boundaries
-
-```text
-ml/src/fraudguard_ml/
-├── dataset.py
-├── contracts.py
-├── leakage.py
-├── features.py
-├── split.py
-├── train.py
-├── evaluate.py
-├── calibrate.py
-├── policy.py
-├── tracking.py
-├── tune.py
-├── explain.py
-├── registry.py
-├── score.py
-└── monitor.py
-```
-
-Notebook chỉ dùng cho exploration/report; logic sản xuất nằm trong importable package và có tests.
-
-### 11.2 Temporal split
-
-- Train: 60% thời gian đầu.
-- Validation/calibration: 20% tiếp theo.
-- Test: 20% cuối.
-- Dùng walk-forward folds khi tuning.
-- Duplicate event không được nằm ở nhiều split.
-- Preprocessing/imputation/encoding chỉ fit trên train.
-- Threshold và calibration chỉ chọn trên validation/calibration.
-- Test chỉ mở sau khi model family, search space và policy đã khóa.
-
-Split boundaries được lưu trong versioned manifest.
-
-### 11.3 Model ladder
-
-1. `DummyClassifier(strategy="prior")`.
-2. Rule baseline, nhưng rule output không làm feature.
-3. Logistic Regression với preprocessing pipeline và class weighting.
-4. HistGradientBoosting.
-5. XGBoost hoặc LightGBM challenger.
-
-Không bắt đầu bằng deep learning. Với tabular synthetic fraud, feature correctness và evaluation quan trọng hơn model complexity.
-
-### 11.4 Metrics
-
-| Nhóm | Metrics |
-|---|---|
-| Ranking | AUPRC/Average Precision; ROC-AUC chỉ phụ |
-| Operations | Precision@k, Recall@k, alerts/hour, false positives/day |
-| Calibration | Brier score, reliability bins, ECE có định nghĩa rõ |
-| Threshold | F2, MCC, confusion matrix |
-| Robustness | Metric theo time/type/amount/activity segment |
-| Runtime | Training/scoring duration, rows/sec, memory peak |
-| Evidence | Positive count, label coverage, confidence intervals |
-
-Accuracy không được dùng để chọn model.
-
-### 11.5 Decision policy
-
-Model và policy là hai artifacts riêng:
-
-- model version tạo score;
-- policy version quyết định threshold/top-k;
-- budget mặc định: 50 alerts/hour;
-- sensitivity report tại 10 và 100 alerts/hour;
-- tie-break deterministic theo score, event time và event ID.
-
-## 12. MLflow Tracking và Model Registry
-
-### 12.1 Deployment
-
-```text
-Training/scoring process
-  → MLflow Tracking Server
-      → PostgreSQL metadata database
-      → MinIO mlflow-artifacts bucket
-```
-
-MLflow là registry duy nhất. Không tạo registry thứ hai trong ClickHouse.
-
-### 12.2 Required run metadata
-
-Tags:
-
-```text
-git_sha
-dataset_name
-dataset_version
-dataset_manifest_sha256
-feature_versions
-dbt_manifest_sha256
-schema_version
-split_version
-problem_definition
-alert_budget
-environment_lock_sha256
-```
-
-Artifacts:
-
-```text
-model/
-feature_schema.json
-dataset_manifest.json
-split_manifest.json
-evaluation.json
-pr_curve.png
-calibration_curve.png
-confusion_matrix.png
-shap_summary.png
-model_card.md
-requirements.lock
-```
-
-### 12.3 Registry lifecycle
-
-```text
-FINISHED MLflow run
-  → automated quality gates
-  → artifact hash verification
-  → prediction parity test
-  → SHAP/privacy review
-  → human approval
-  → registered model version
-  → candidate alias
-  → challenger batch comparison
-  → champion alias
-```
-
-Không retrain trong promotion. Exact artifact đã được đánh giá mới được register.
-
-### 12.4 Promotion gates
-
-```text
-data_quality_passed
-AND point_in_time_tests_passed
-AND leakage_audit_passed
-AND candidate.val_auprc > baseline.val_auprc
-AND candidate.recall_at_budget >= minimum_recall
-AND candidate.calibration_within_tolerance
-AND no_severe_segment_regression
-AND scoring_schema_compatible
-AND serialization_parity_passed
-AND human_approval
-```
-
-Rollback chỉ đổi `champion` alias về immutable version trước. Không xóa prediction history.
-
-## 13. Optuna và SHAP
-
-### 13.1 Optuna
-
-- Chỉ bật sau khi baseline/split/metrics ổn định.
-- Persistent study dùng PostgreSQL database riêng `optuna`.
-- Mỗi trial ánh xạ tới nested MLflow run.
-- Cố định dataset, feature và split version trong study attributes.
-- Dùng seeded TPE sampler và pruning có kiểm soát.
-- Giới hạn trials, timeout, CPU và memory.
-- Không tune theo test metric.
-- Không auto-promote `best_trial`.
-
-Objective mặc định: maximize mean temporal-fold AUPRC, với recall@budget là constraint hoặc secondary objective.
-
-### 13.2 SHAP
-
-- Linear model: coefficient report hoặc `LinearExplainer`.
-- Tree models: `TreeExplainer`.
-- Background/explanation samples có fixed seed.
-- Log output space: margin/log-odds/probability.
-- Map encoded names về business feature names.
-- Global artifacts: mean absolute SHAP, beeswarm, dependence và fold stability.
-- Local explanations: chỉ top-N reasons cho alerts hoặc monitoring sample.
-- Không lưu raw account identifiers.
-- SHAP là association-based explanation, không phải causal proof.
-
-## 14. Batch scoring
-
-### 14.1 Scoring flow
-
-1. Loader hoàn thành micro-batch và reconciliation.
-2. dbt refresh CORE/FEATURE models.
-3. Scorer resolve `champion` alias thành exact MLflow version.
-4. Validate feature contract/signature.
-5. Đọc unscored feature rows từ ClickHouse theo bounded batch.
-6. Score trong Python bằng exact serialized pipeline.
-7. Áp dụng versioned decision policy.
-8. Ghi scores, alerts và top-N reasons vào ClickHouse.
-9. Commit scoring batch audit sau khi row reconciliation pass.
-
-### 14.2 Score grain
-
-```text
-(event_id, model_name, model_version, feature_version, policy_version)
-```
-
-Không overwrite score cũ khi model/policy thay đổi.
-
-### 14.3 Tables
-
-`fraudguard_ml.transaction_scores`:
-
-```text
-event_id
-event_time
-scoring_batch_id
-model_name
-model_version
-mlflow_run_id
-feature_version
-prediction_score
-scored_at
-scorer_git_sha
-```
-
-`fraudguard_ml.alert_decisions`:
-
-```text
-event_id
-model_version
-policy_version
-threshold
-alert_rank
-is_alert
-decision_at
-```
-
-`fraudguard_ml.transaction_explanations` lưu top-N business-safe reasons và exact model/feature version.
-
-## 15. Monitoring và delayed-label evaluation
-
-### 15.1 Monitoring contract
-
-Prediction ghi ngay; label có thể đến sau. Tách hai loại metric:
-
-**Không cần label**
-
-- score distribution drift;
-- feature distribution/null drift;
-- prediction volume;
-- scoring latency/failure;
-- alert volume và budget violation.
-
-**Cần mature label**
-
-- AUPRC;
-- precision/recall@budget;
-- Brier/calibration;
-- prevalence;
-- segment performance.
-
-Performance query chỉ đọc cohort đã mature theo label policy. Dashboard luôn hiển thị sample size, positive count và label coverage.
-
-### 15.2 Monitoring implementation
-
-- dbt tạo daily/hourly data quality và volume marts.
-- Python job tính AUPRC, calibration, PSI/KS/distribution distances và confidence intervals.
-- Metric rows ghi vào `fraudguard_monitoring.model_metrics` với exact model, feature, policy và cohort versions.
-- Baseline distributions là immutable artifacts, không recompute âm thầm.
-- Drift mở investigation; không tự động retrain.
-
-### 15.3 Alert policies
-
-- Contract/data quality failure: chặn scoring.
-- Loader/reconciliation failure: chặn downstream batch.
-- Low label coverage: suppress performance alert và báo `INSUFFICIENT_LABELS`.
-- Drift breach: mở investigation.
-- Mature performance regression: xem xét rollback/challenger.
-- MLflow/MinIO artifact unavailable: scoring fail closed, không fallback sang model không xác định.
-
-## 16. Superset
-
-Superset dùng `clickhouse-connect` và một ClickHouse user read-only. Chỉ đọc:
-
-- `fraudguard_mart.*`;
-- `fraudguard_monitoring.*`;
-- masked alert-detail view đã được approve.
-
-### Dashboard 1 — Pipeline & data quality
-
-- latest MinIO object/ClickHouse load;
-- file status và loader latency;
-- parsed vs loaded rows;
-- duplicate/quarantine rate;
-- event-time freshness;
-- schema ID distribution.
-
-### Dashboard 2 — Fraud operations
-
-- alert queue theo risk band;
-- alerts/hour vs budget;
-- score và amount distribution;
-- false-positive volume;
-- masked transaction detail và top-N reasons.
-
-### Dashboard 3 — Model performance
-
-- AUPRC, precision@k, recall@k;
-- Brier/calibration;
-- label coverage/sample size;
-- segment metrics;
-- champion vs challenger.
-
-### Dashboard 4 — Drift
-
-- feature/score distribution shift;
-- null drift;
-- volume/prevalence shift;
-- cohort size và confidence warning.
-
-Business metrics được định nghĩa trong dbt, không viết lại tùy ý trong từng chart.
-
-## 17. Repository structure đích
+## 4. Cấu trúc repository mục tiêu
 
 ```text
 ML_Fraud_Banking/
-├── README.md
+├── AGENTS.md
 ├── ROADMAP.md
-├── DATA_CONTRACT.md
-├── MODEL_CARD.md
-├── docker-compose.yml
-├── .env.example
 ├── pyproject.toml
 ├── uv.lock
-├── producer/
-│   ├── kafka_producer.py
-│   └── delayed_label_producer.py
-├── schemas/
-├── spark/jobs/
-│   ├── kafka_to_minio.py
-│   └── kafka_labels_to_minio.py
-├── minIO/
-│   └── init_bucket.sh
-├── clickhouse/
-│   ├── README.md
-│   ├── config.d/
-│   ├── users.d/
-│   ├── ddl/
-│   └── loader/
-│       └── minio_to_clickhouse.py
-├── dbt/fraudguard/
-│   ├── dbt_project.yml
+├── configs/
+│   ├── data/
+│   │   ├── smoke.yaml
+│   │   ├── benchmark.yaml
+│   │   └── final.yaml
 │   ├── models/
-│   ├── macros/
+│   │   ├── logistic.yaml
+│   │   ├── hist_gradient_boosting.yaml
+│   │   ├── xgboost.yaml
+│   │   ├── lightgbm.yaml
+│   │   ├── catboost.yaml
+│   │   └── pytorch_mlp.yaml
+│   ├── tuning/
+│   ├── policy/
+│   └── llm/
+├── dbt/
+│   ├── models/
+│   │   ├── staging/
+│   │   ├── intermediate/
+│   │   ├── features/
+│   │   ├── marts/
+│   │   └── monitoring/
 │   └── tests/
 ├── ml/
-│   ├── configs/
-│   ├── contracts/
 │   ├── src/fraudguard_ml/
-│   └── notebooks/
-├── mlflow/
-│   ├── README.md
-│   └── retention_policy.md
-├── superset/
-│   ├── Dockerfile
-│   ├── requirements-local.txt
-│   └── dashboards/
-├── scripts/
-│   ├── bootstrap_clickhouse.py
-│   ├── build_training_snapshot.py
-│   ├── promote_model.py
-│   └── run_monitoring.py
-└── tests/
-    ├── unit/
-    ├── contract/
-    ├── integration/
-    ├── dbt/
-    ├── ml/
-    └── e2e/
+│   │   ├── cli.py
+│   │   ├── config.py
+│   │   ├── contracts.py
+│   │   ├── dataset.py
+│   │   ├── leakage.py
+│   │   ├── split.py
+│   │   ├── preprocessing.py
+│   │   ├── metrics.py
+│   │   ├── models/
+│   │   ├── training/
+│   │   ├── tuning/
+│   │   ├── calibration.py
+│   │   ├── policy.py
+│   │   ├── explain.py
+│   │   ├── registry.py
+│   │   ├── scoring.py
+│   │   ├── monitoring.py
+│   │   └── copilot.py
+│   └── tests/
+│       ├── unit/
+│       ├── contract/
+│       ├── temporal/
+│       └── integration/
+├── notebooks/
+│   ├── 01_data_understanding.ipynb
+│   ├── 02_leakage_audit.ipynb
+│   ├── 03_feature_experiments.ipynb
+│   ├── 04_model_error_analysis.ipynb
+│   └── 05_deep_learning.ipynb
+├── reports/
+│   ├── eda/
+│   ├── experiments/
+│   ├── model_cards/
+│   └── llm_evals/
+├── streamlit_app/
+│   ├── app.py
+│   ├── pages/
+│   └── components/
+└── scripts/
+    ├── build_training_snapshot.py
+    ├── train.py
+    ├── tune.py
+    ├── evaluate.py
+    ├── promote.py
+    ├── score.py
+    └── monitor.py
 ```
 
-Data, Kafka logs, checkpoints, secrets, model binaries, MLflow metadata và notebook outputs lớn không được commit.
+Không commit snapshot, model binary, MLflow data, Optuna database, notebook
+output lớn hoặc Ollama model weights.
 
-## 18. Roadmap thực thi
+## 5. Roadmap thực thi
 
-### M0 — Problem, contracts và local foundations
+Các milestone sau có dependency tuần tự. Không chuyển milestone chỉ vì code đã
+chạy; phải đạt exit criteria.
 
-**Công việc**
+### M0 — Khôi phục development gate và tạo ML package
 
-- Chốt pre-transaction detection.
-- Chốt primary metrics và alert budget.
-- Tạo source manifest cho PaySim.
-- Pin compatible dependency/container versions.
-- Tách secrets khỏi Compose thành `.env.example`.
+Hướng dẫn code và checklist chi tiết: [`M0.md`](M0.md).
 
-**Exit criteria**
+#### Mục tiêu học
+
+- Hiểu dependency groups, `src` layout, configuration validation và test
+  pyramid.
+- Phân biệt service runtime với training runtime.
 
-- Problem statement, metric dictionary và intended use/misuse được review.
-- Không còn ambiguity về field availability tại inference.
+#### Triển khai
 
-### M1 — Deterministic event time và delayed labels
+1. Khôi phục Docker Desktop WSL integration và xác nhận
+   `docker compose config --quiet` chạy được.
+2. Tạo dependency groups trong `pyproject.toml`: `data`, `ml`, `deep-learning`,
+   `app`, `dev`.
+3. Tạo `ml/src/fraudguard_ml` và CLI entry point.
+4. Tạo Pydantic config models; YAML không được đọc thành dictionary không kiểm
+   soát.
+5. Thêm Ruff, mypy, pytest và pre-commit.
+6. Tạo smoke command không cần services để kiểm tra import/config.
+7. Ghi lại CPU count, RAM limit, GPU availability và random seed trong mỗi
+   training run.
 
-**Công việc**
+#### Tests
 
-- Nâng transaction schema v2.
-- Tạo stable event time/sequence/source fingerprint.
-- Implement delayed label producer/schedule.
-- Tạo fixture normal, fraud, duplicate, malformed và out-of-order.
+- Package import được trong clean `uv sync`.
+- Config thiếu field bắt buộc phải fail với message rõ ràng.
+- Seed được truyền tới NumPy, scikit-learn, Optuna và PyTorch.
+- `ruff check`, `mypy` cho core package và unit tests pass.
 
-**Exit criteria**
+#### Exit criteria
 
-- Replay cùng row tạo cùng ID/time/sequence.
-- Transaction không chứa label.
-- Label thực sự đến sau theo deterministic policy.
+```text
+uv sync --all-groups
+uv run pytest ml/tests/unit
+uv run ruff check .
+uv run python -m fraudguard_ml.cli --help
+docker compose config --quiet
+```
 
-### M2 — Complete MinIO landing
+### M1 — dbt canonical layer và data quality gate
 
-**Công việc**
+#### Mục tiêu học
 
-- Landing cả transaction và label.
-- Hoàn thiện object layout và metadata.
-- Kiểm tra checkpoint/restart/quarantine.
-- Thêm training-snapshot và MLflow artifact buckets.
+- Grain, cardinality, deduplication semantics và delayed-label joins.
+- Vì sao ML không được train trực tiếp từ raw ingestion tables.
 
-**Exit criteria**
-
-- Có thể khôi phục valid transactions và labels chỉ từ MinIO.
-- Replay không tăng distinct business events.
-
-### M3 — ClickHouse foundation
-
-**Công việc**
-
-- Thêm pinned ClickHouse service và persistent volume.
-- Tạo databases, users, roles, quotas và DDL versioned.
-- Thiết kế RAW/label/audit tables.
-- Thêm healthcheck, backup/restore smoke và query logging policy.
-
-**Exit criteria**
-
-- Bootstrap từ empty volume bằng một command.
-- Role tests chứng minh least privilege.
-- Restart không mất data.
-
-### M4 — Idempotent MinIO loader
-
-**Công việc**
-
-- Implement object discovery, audit, direct `s3()` load và reconciliation.
-- Thêm dry-run, `--limit-files` và bounded retries.
-- Lưu source object lineage trong từng RAW row.
-
-**Exit criteria**
-
-- Load/retry cùng object không tăng canonical business rows.
-- Crash recovery và corrupt-file paths có integration tests.
-- 100.000 transactions được reconcile.
-
-### M5 — dbt CORE và data quality
-
-**Công việc**
-
-- Khởi tạo `dbt-clickhouse` project.
-- Xây STAGING/CORE canonical models.
-- Thêm tests, descriptions, exposures và manifests.
-- Tạo initial pipeline/data-quality marts.
-
-**Exit criteria**
-
-- `dbt build` pass trên RAW fixture.
-- CORE reconcile với MinIO/RAW.
-- Mọi excluded row có reason.
-
-### M6 — EDA và leakage audit
-
-**Công việc**
-
-- Temporal prevalence/type/amount analysis.
-- Entity overlap và duplicate analysis theo split.
-- Pre/post-transaction availability audit.
-- Label delay/coverage analysis.
-- Chốt feature allowlist/denylist.
-
-**Exit criteria**
-
-- EDA report tái lập được bằng fixed snapshot/seed.
-- Leakage review pass trước feature implementation.
-
-### M7 — Point-in-time features và immutable snapshot
-
-**Công việc**
-
-- Xây transaction/origin/destination/pattern feature models.
-- Thêm feature contracts và versioning.
-- Tạo training spine, temporal split manifest và export snapshot.
-- Golden tests cho current/future/tie/out-of-order boundaries.
-
-**Exit criteria**
-
-- Point-in-time/leakage suite pass 100%.
-- Snapshot truy được về MinIO objects, ClickHouse query, dbt manifest và Git SHA.
-- Rebuild deterministic trong tolerance.
-
-### M8 — Baseline + MLflow
-
-**Công việc**
-
-- Thêm PostgreSQL + MLflow Tracking Server.
-- Train Dummy/rule/Logistic Regression.
-- Log đầy đủ data/model/evaluation artifacts.
-- Đăng ký candidate đầu tiên và test serialization parity.
-
-**Exit criteria**
-
-- MLflow restart không mất metadata/artifacts.
-- Một run được load lại và tạo prediction parity.
-- Test chưa được dùng để tune.
-
-### M9 — Challenger, tuning, calibration và explanations
-
-**Công việc**
-
-- Train HistGradientBoosting và XGBoost hoặc LightGBM.
-- Optuna walk-forward study với budget.
-- Calibration và alert-budget policy.
-- SHAP global/local explanation và segment analysis.
-
-**Exit criteria**
-
-- Candidate chỉ thắng theo gate định trước.
-- Test mở đúng một lần sau khi model/policy đã khóa.
-- Model card nêu limitations/failure modes.
-
-### M10 — Registry promotion và batch scoring
-
-**Công việc**
-
-- Implement automated gates, approval record và alias transitions.
-- Implement bounded idempotent scorer.
-- Ghi scores, decisions, explanations và batch audit.
-- Diễn tập champion rollback.
-
-**Exit criteria**
-
-- Chỉ registered/approved exact version được score.
-- Transaction trace được từ MinIO object tới score/model version.
-- Rollback không xóa lịch sử.
-
-### M11 — Monitoring, Superset và final demo
-
-**Công việc**
-
-- Xây delayed-label monitoring pipeline.
-- Tạo data/model/operations marts.
-- Kết nối Superset bằng read-only role.
-- Tạo bốn dashboards và end-to-end runbook.
-- Hoàn thiện README, contracts và model card.
-
-**Exit criteria**
-
-- Demo từ replay tới dashboard bằng command sequence.
-- Dashboard không đọc RAW và không lộ raw identifiers.
-- Runbook phân biệt data failure, drift, performance regression và insufficient labels.
-
-## 19. Test strategy
-
-### 19.1 Unit
-
-- Stable event ID/time/sequence.
-- MinIO object filter và loader state transitions.
-- Metric/threshold deterministic tie-break.
-- Feature calculation trên fixture nhỏ.
-- MLflow required metadata validator.
-- Optuna objective và seed.
-- SHAP name mapping/top-N reasons.
-- Registry promotion gate evaluator.
-
-### 19.2 Contract
-
-- Avro backward compatibility và label isolation.
-- Parquet ↔ ClickHouse type compatibility.
-- dbt source/model contracts.
-- Feature schema/version contract.
-- Snapshot manifest/hash contract.
-- MLflow run/registry metadata contract.
-- Scoring input/output contract.
-
-### 19.3 Integration
-
-- Kafka → Spark → MinIO.
-- MinIO → ClickHouse RAW + audit.
-- RAW → dbt CORE reconciliation.
-- dbt features → immutable snapshot.
-- Training → MLflow PostgreSQL + MinIO artifacts.
-- Optuna trial → nested MLflow run.
-- MLflow Registry → batch score → ClickHouse.
-- Scores + labels → monitoring metrics.
-- Superset role đọc MART nhưng bị chặn RAW/FEATURE.
-
-### 19.4 ML validation
-
-- Temporal boundaries và entity/duplicate leakage.
-- Train-only preprocessing.
-- Baseline comparison.
-- Calibration và alert budgets.
-- Confidence intervals và segment performance.
-- Determinism/serialization parity.
-- SHAP additivity/stability/privacy.
-- Champion/challenger regression gates.
-- Drift/no-drift fixtures và label coverage gate.
-
-### 19.5 End-to-end
-
-1. Replay 100.000 rows.
-2. Xác nhận Kafka delivery.
-3. Xác nhận MinIO valid/quarantine/labels.
-4. Load ClickHouse và reconcile audit.
-5. Chạy `dbt build`.
-6. Build immutable training snapshot.
-7. Train/evaluate/register model.
-8. Promote approved version.
-9. Score unseen micro-batch.
-10. Join mature labels và refresh monitoring.
-11. Validate Superset dashboards.
-
-Mỗi boundary kiểm tra row count, distinct event key, min/max event time, positive count và lineage; không chỉ assert exit code 0.
-
-## 20. Security, reliability và cost controls
-
-- Không commit `.env`, credentials, tokens hoặc raw private identifiers.
-- Dùng service accounts riêng cho MinIO, ClickHouse, MLflow và Superset.
-- Superset chỉ SELECT approved views.
-- MLflow và Superset metadata dùng PostgreSQL persistent volumes và backup.
-- MLflow artifact access đi qua service account tối thiểu quyền.
-- Không expose Kafka, MinIO, ClickHouse, MLflow hoặc Superset public nếu chưa có auth/TLS/reverse proxy.
-- Pin image tags/digests và Python lockfile; không dùng `latest`.
-- Giới hạn ClickHouse memory, threads, query time và disk.
-- Giới hạn Optuna trials/timeout/parallelism.
-- Hash/mask account identifiers trong marts, explanations và logs.
-- Có retention cho raw data, training snapshots, artifacts, explanations và scores.
-- Thực hành backup/restore ClickHouse, PostgreSQL và MinIO trước final demo.
-
-## 21. Command contract mục tiêu
+#### Triển khai
+
+1. Tạo staging models chuẩn hóa tên/type nhưng không thêm business logic.
+2. Tạo canonical transaction model có đúng một row cho mỗi `event_id`.
+3. Tạo canonical label model chọn label version hợp lệ mới nhất tại mỗi cutoff.
+4. Tạo reconciliation model so sánh source rows, canonical rows, duplicate và
+   quarantine counts.
+5. Document grain, owner, freshness và contract cho từng model.
+6. Tạo data-quality summary làm đầu vào cho snapshot builder.
+
+#### Tests bắt buộc
+
+- `event_id` unique và not null ở canonical transaction.
+- `is_fraud` chỉ nhận 0/1.
+- `observed_at >= event_time`.
+- Không orphan label sau maturity window đã định nghĩa.
+- Amount/balance range hợp lệ hoặc được gắn data-quality flag.
+- Join transaction-label không làm tăng transaction grain.
+- Future label không xuất hiện tại cutoff quá khứ.
+
+#### Exit criteria
+
+- `dbt build` pass trên fixture và dữ liệu local.
+- Có báo cáo row-count/duplicate/null/label coverage theo event date.
+- Snapshot builder từ chối chạy nếu critical dbt test fail.
+
+### M2 — EDA, problem framing và leakage audit
+
+#### Mục tiêu học
+
+- Imbalanced classification khác balanced classification như thế nào.
+- Temporal drift, selection bias, target leakage và proxy leakage.
+- Vì sao EDA phải dẫn đến feature hypothesis, không chỉ tạo biểu đồ.
+
+#### Triển khai
+
+1. Profile fraud prevalence theo thời gian, transaction type và amount band.
+2. Phân tích label delay và xác định maturity window.
+3. Phân tích balance inconsistencies của PaySim.
+4. Kiểm tra account recurrence, new-account rate và counterparty concentration.
+5. Xác định temporal split boundaries không cắt duplicate/correction.
+6. Tạo feature allowlist, denylist và review checklist.
+7. Viết problem statement cuối:
+   - prediction time;
+   - target;
+   - alert capacity;
+   - cost của false positive/false negative;
+   - giới hạn dữ liệu synthetic.
+8. Ghi feature hypotheses trước khi nhìn test metric.
+
+#### Leakage denylist tối thiểu
+
+- `is_fraud`, `is_flagged_fraud` và mọi biến dẫn xuất từ chúng.
+- `observed_at`, label version hoặc investigation outcome tại inference.
+- Future transaction/future aggregate.
+- Raw account ID dùng như categorical shortcut.
+- Dataset row order nếu nó vô tình mã hóa target.
+- Feature được tính bằng toàn bộ dataset trước khi split.
+
+#### Deliverables
+
+- `notebooks/01_data_understanding.ipynb`.
+- `notebooks/02_leakage_audit.ipynb`.
+- `reports/eda/eda_report.md`.
+- `configs/data/split_v1.yaml`.
+- `configs/data/feature_allowlist_v1.yaml`.
+
+#### Exit criteria
+
+- Mọi feature V1 có availability time và business rationale.
+- Split được chốt trước model comparison.
+- Test window chưa được dùng để chọn feature/model.
+
+### M3 — Point-in-time feature engineering V1
+
+#### Mục tiêu học
+
+- Window features, entity history, availability time và cold-start handling.
+- Feature definition khác feature value như thế nào.
+- Cách chứng minh một aggregate point-in-time correct.
+
+#### Feature groups
+
+| Nhóm | Feature ví dụ |
+|---|---|
+| Transaction | `log_amount`, transaction type, hour/day, amount bucket |
+| Balance | origin/destination balance ratios, delta, zero-balance flags |
+| Origin velocity | count/sum/mean/max trong 1h, 6h, 24h |
+| Destination velocity | inbound count/sum/unique origins trong 1h, 6h, 24h |
+| Counterparty | first-seen flag, prior pair count, prior pair amount |
+| Novelty | amount z-score/robust deviation so với lịch sử entity |
+| Behavioral | time since prior transaction, burstiness, cash-out sequence |
+| Data quality | missing/inconsistent balance indicators |
+
+#### Quy tắc
+
+- Window phải kết thúc trước event hiện tại; tie-break bằng event sequence hoặc
+  event ID ổn định.
+- Không dùng raw account ID làm model input.
+- Null không tự động fill 0 nếu 0 có business meaning.
+- Feature có logic/window/unit/null policy thay đổi phải tạo version mới.
+- Feature SQL phải giữ grain một row mỗi `event_id`.
+
+#### Triển khai
+
+1. Tạo intermediate models cho entity histories.
+2. Tạo feature models theo từng group thay vì một SQL khổng lồ.
+3. Tạo feature registry YAML gồm:
+   - name/type;
+   - entity;
+   - description;
+   - lookback window;
+   - availability;
+   - null policy;
+   - owner;
+   - source model;
+   - feature version.
+4. Tạo final `features_transaction_v1`.
+5. Tạo smoke fixtures có event tương lai để test invariance.
+
+#### Tests bắt buộc
+
+- Thêm transaction tương lai không thay đổi feature quá khứ.
+- Row count và event IDs bằng canonical transaction spine.
+- Feature types khớp registry.
+- Không xuất hiện denylisted column.
+- First-event/cold-start behavior đúng.
+- Window boundary và same-timestamp tie-break deterministic.
+
+#### Exit criteria
+
+- Point-in-time tests pass.
+- Có profile null/range/distribution cho mọi feature.
+- Feature query chạy được trên full local dataset trong resource budget.
+
+### M4 — Immutable training snapshots
+
+#### Mục tiêu học
+
+- Dataset versioning, reproducibility và label maturity.
+- Tại sao training không đọc mutable feature view trực tiếp.
+
+#### Triển khai
+
+1. Tạo training spine bằng feature version, label policy và cutoff cụ thể.
+2. Materialize Parquet partitioned theo split/time.
+3. Tạo ba configs: smoke, benchmark và final.
+4. Tạo manifest chứa:
+   - dataset/version;
+   - creation time;
+   - source model và dbt manifest hash;
+   - Git SHA;
+   - feature/split/label-policy versions;
+   - cutoff/maturity window;
+   - row/positive counts theo split;
+   - schema;
+   - object paths, sizes và SHA-256.
+5. Builder phải atomic: chỉ publish manifest sau khi mọi part và validation
+   hoàn thành.
+6. Dùng Polars lazy scan để đọc selected columns; không load toàn snapshot khi
+   chỉ cần một split.
+
+#### Sampling contract
+
+- Smoke sample dùng stable hash của `event_id`, chỉ để chạy code/test.
+- Benchmark có thể giảm training negatives nhưng validation giữ prevalence tự
+  nhiên.
+- Final dùng full data.
+- Nếu training prevalence bị thay đổi, sample weights và original prevalence
+  phải được ghi lại; calibration luôn dùng natural-prevalence data.
+
+#### Exit criteria
+
+- Build lại cùng input tạo cùng logical dataset hash.
+- Corrupt/missing Parquet part làm validation fail.
+- Không event nào xuất hiện ở nhiều split.
+- Training command chỉ nhận dataset version, không nhận mutable SQL query.
+
+### M5 — MLflow foundation và experiment contract
+
+#### Mục tiêu học
+
+- Run, experiment, artifact, registered model và alias khác nhau thế nào.
+- Model reproducibility cần nhiều hơn một file model.
+
+#### Triển khai
+
+1. Thêm một PostgreSQL metadata service dành cho MLflow/Optuna, tách database và
+   user theo least privilege.
+2. Thêm MLflow server; metadata ở PostgreSQL, artifacts ở MinIO.
+3. Tạo helper logging dùng chung cho mọi model family.
+4. Log bắt buộc:
+   - Git SHA và dirty-worktree flag;
+   - environment/lock hash;
+   - dataset manifest/hash;
+   - feature/split/label-policy versions;
+   - config đầy đủ;
+   - seed và resource limits;
+   - metrics theo split/segment;
+   - fit/predict duration và memory;
+   - model signature, input example và artifact.
+5. Tạo prediction reload-parity test.
+
+#### Exit criteria
+
+- Restart MLflow không mất metadata/artifacts.
+- Một run có thể tải lại exact model và tái tạo prediction trong tolerance.
+- Run thiếu required metadata không đủ điều kiện register.
+
+### M6 — Baseline models và evaluation framework
+
+#### Mục tiêu học
+
+- Baseline, preprocessing pipeline, class imbalance và metric selection.
+- Ranking quality khác probability quality và decision quality.
+
+#### Model ladder
+
+1. `DummyClassifier(strategy="prior")`.
+2. Business rule baseline.
+3. Logistic Regression có regularization và class weights.
+4. `HistGradientBoostingClassifier`.
+
+#### Evaluation contract
+
+| Mục đích | Metrics |
+|---|---|
+| Ranking | AUPRC/Average Precision; ROC-AUC chỉ là phụ |
+| Alert operations | Precision@k, Recall@k, fraud amount recall@k |
+| Capacity | alerts/hour, false positives/day |
+| Classification | confusion matrix, F2, MCC tại policy đã chọn |
+| Probability | Brier score, log loss, calibration bins |
+| Robustness | metric theo time/type/amount/activity segment |
+| Runtime | fit time, score throughput, peak memory |
+
+#### Triển khai
+
+1. Tạo model interface chung: `fit`, `predict_score`, `save`, `load`.
+2. Fit preprocessing chỉ trên train.
+3. Tạo walk-forward validation folds từ config đã khóa.
+4. Tạo bootstrap confidence interval theo time block, không bootstrap row độc
+   lập nếu phá temporal dependence.
+5. Log PR curve, score distribution, error slices và resource metrics.
+6. Viết model card cho Logistic Regression baseline.
+
+#### Exit criteria
+
+- Baseline chạy được end-to-end từ immutable snapshot tới MLflow.
+- Metrics có unit tests với hand-calculated fixture.
+- Test split vẫn khóa.
+- Logistic model coefficients được map về business feature names.
+
+### M7 — Multi-library tree benchmark
+
+#### Mục tiêu học
+
+- Bagging/boosting, leaf-wise/level-wise growth, categorical handling và early
+  stopping.
+- So sánh model công bằng trên cùng data/split/metric/resource budget.
+
+#### Models
+
+- HistGradientBoosting.
+- XGBoost.
+- LightGBM.
+- CatBoost.
+
+#### Benchmark protocol
+
+1. Dùng cùng feature set V1 và benchmark snapshot.
+2. Dùng fixed seed và giới hạn tối đa 8 CPU threads/model.
+3. Chọn reasonable defaults và một search rất nhỏ; chưa chạy full tuning.
+4. Early stopping chỉ nhìn validation fold.
+5. Log:
+   - mean/fold AUPRC;
+   - recall và precision tại alert budget;
+   - calibration trước calibration step;
+   - train/inference time;
+   - peak RAM;
+   - serialized size;
+   - segment regressions.
+6. Shortlist tối đa hai tree libraries để tuning sâu.
+
+#### Exit criteria
+
+- Có model comparison report giải thích trade-off, không chỉ bảng metric.
+- Chênh lệch metric có confidence interval hoặc stability evidence.
+- Shortlist được chọn bằng tiêu chí đã định trước.
+
+### M8 — Feature selection, ablation và graph features V2
+
+#### Mục tiêu học
+
+- Feature importance không đồng nghĩa causal importance.
+- Ablation study, redundancy, stability và feature cost.
+- Graph concepts áp dụng được mà chưa cần GNN.
+
+#### Triển khai
+
+1. Ablate từng feature group V1.
+2. Đo permutation importance và SHAP stability giữa temporal folds.
+3. Nhóm correlated/redundant features; ưu tiên feature dễ giải thích và ổn định.
+4. Không dùng recursive feature elimination trên full dataset nếu chi phí quá
+   lớn.
+5. Tạo point-in-time graph features:
+   - prior in/out degree;
+   - unique counterparties;
+   - fan-in/fan-out;
+   - shared-destination count;
+   - rapid fund-flow chain indicators;
+   - counterparty concentration;
+   - rolling net-flow ratio.
+6. Tạo feature version V2 và chạy V1-vs-V2 comparison.
+
+#### Exit criteria
+
+- Mỗi feature group có measured lift/cost/stability.
+- Graph feature không dùng future edge.
+- Feature set cuối được khóa trước full tuning.
+
+### M9 — Hyperparameter tuning với Optuna
+
+#### Mục tiêu học
+
+- Search space design, sampling, pruning, overfitting vào validation và compute
+  budgeting.
+- Vì sao nhiều trials không tự động tạo model tốt hơn.
+
+#### Tuning strategy
+
+1. Tune hai tree models đã shortlist.
+2. Objective chính: mean walk-forward AUPRC.
+3. Log secondary constraints:
+   - minimum recall@budget;
+   - no severe segment regression;
+   - maximum fit time/RAM.
+4. Dùng seeded TPE.
+5. Dùng library-compatible pruning/early stopping.
+6. Mỗi trial là nested MLflow run.
+7. Study lưu PostgreSQL và resume được.
+8. Chạy tuần tự; không parallel nhiều model trên máy 8 GB RAM.
+
+#### Compute budgets
+
+| Cấp | Trial budget | Mục đích |
+|---|---:|---|
+| Smoke | 3–5/model | Test objective/search space |
+| Benchmark | 15–25/model | Thu hẹp search |
+| Final | tối đa 40–60/model | Tuning có kiểm soát |
+
+Không dùng test metric trong objective. Không giữ mọi model artifact của trial
+thua nếu gây đầy MinIO; giữ params/metrics và top-N artifacts.
+
+#### Deliverables
+
+- Search-space YAML cho từng model.
+- Optimization history.
+- Hyperparameter importance.
+- Parallel-coordinate plot.
+- Trial failure/OOM report.
+- Best-config files không phụ thuộc trực tiếp vào Optuna database.
+
+#### Exit criteria
+
+- Study resume được sau interruption.
+- Best trial được retrain từ config độc lập và cho metric parity.
+- Tuning report chỉ ra tham số nào có tác động và dấu hiệu overfitting.
+
+### M10 — Calibration và alert decision policy
+
+#### Mục tiêu học
+
+- Discrimination khác calibration.
+- Threshold, top-k và analyst capacity là business policy, không phải model
+  hyperparameter.
+
+#### Triển khai
+
+1. Dành calibration window riêng sau training window.
+2. So sánh uncalibrated, sigmoid/Platt và isotonic.
+3. Không fit calibrator trên prediction in-sample.
+4. Đánh giá reliability diagram, Brier/log loss và stability theo time.
+5. Tạo policy versions:
+   - fixed threshold;
+   - top-k mỗi hour;
+   - hybrid minimum score + capacity cap.
+6. Báo cáo sensitivity ở nhiều capacity levels.
+7. Chốt deterministic tie-break.
+
+#### Exit criteria
+
+- Model artifact và policy artifact có version riêng.
+- Calibration cải thiện reliability mà không làm ranking contract sai.
+- Policy được chọn trên validation/calibration, không trên test.
+
+### M11 — Deep-learning challenger bằng PyTorch
+
+#### Mục tiêu học
+
+- Dataset/DataLoader, mini-batch optimization, regularization, embeddings,
+  weighted loss, focal loss, early stopping và GPU memory.
+- Hiểu vì sao deep learning có thể không thắng gradient boosting trên tabular
+  data.
+
+#### Model V1
+
+- MLP cho numeric features.
+- Embedding chỉ cho low-cardinality fields như transaction type/time bucket.
+- Không embedding raw account IDs.
+- Batch normalization hoặc layer normalization được coi là experiment.
+- Weighted BCE là loss chính; focal loss là controlled comparison.
+
+#### Triển khai
+
+1. Tạo dataset reader từ Parquet theo batch.
+2. Fit numeric preprocessing chỉ trên train.
+3. Tạo training loop có:
+   - fixed seeds;
+   - early stopping;
+   - gradient clipping;
+   - checkpoint best validation state;
+   - AMP nếu CUDA pass numerical parity;
+   - CPU fallback.
+4. Log epoch metrics/checkpoints vào MLflow.
+5. Dùng Optuna budget nhỏ cho hidden dimensions, dropout, learning rate,
+   weight decay và batch size.
+6. So sánh với tree champion trên cùng final candidate features.
+
+#### Resource guards
+
+- Bắt đầu batch size nhỏ; tự động giảm batch nếu CUDA OOM một lần.
+- Không chạy nhiều DL trials song song.
+- DataLoader không spawn quá nhiều workers trên WSL.
+- Ghi peak VRAM/RAM và training time.
+
+#### Exit criteria
+
+- Checkpoint reload cho prediction parity.
+- CPU và GPU prediction nằm trong numerical tolerance.
+- Báo cáo giải thích model thắng/thua ở metric, stability và cost.
+- Deep model không được chọn chỉ vì phức tạp hơn.
+
+### M12 — Anomaly detection và final model selection
+
+#### Mục tiêu học
+
+- Supervised fraud detection khác unsupervised anomaly detection.
+- Anomaly không đồng nghĩa fraud.
+- Champion selection cần nhiều quality gates.
+
+#### Triển khai
+
+1. Fit Isolation Forest trên feature subset phù hợp.
+2. Đánh giá anomaly score như tín hiệu riêng.
+3. Thử hai phương án có kiểm soát:
+   - hiển thị anomaly score cho analyst;
+   - dùng anomaly score làm feature của supervised model, chỉ khi point-in-time
+     và train-only fit được đảm bảo.
+4. Không blend score thủ công nếu chưa có validation evidence.
+5. Khóa model family, feature version, calibration và policy.
+6. Mở test đúng một lần cho final comparison.
+
+#### Promotion gates
+
+```text
+data_quality_passed
+AND snapshot_integrity_passed
+AND point_in_time_tests_passed
+AND leakage_audit_passed
+AND validation_auprc_beats_baseline
+AND recall_at_budget_meets_floor
+AND calibration_within_tolerance
+AND no_severe_segment_regression
+AND serialization_parity_passed
+AND resource_budget_passed
+AND human_approval
+```
+
+#### Exit criteria
+
+- Có final evaluation report và model card.
+- Test result không được dùng để quay lại tune cùng test set.
+- Champion được chọn bằng evidence; có thể là Logistic Regression, tree hoặc
+  PyTorch.
+
+### M13 — Explainability, registry và batch scoring
+
+#### Mục tiêu học
+
+- Global importance, local attribution, reason code và causal explanation khác
+  nhau.
+- Registry alias, immutable model version và rollback.
+
+#### Triển khai
+
+1. Dùng SHAP phù hợp với champion model; background sample có fixed seed.
+2. Kiểm tra output space và SHAP additivity.
+3. Tạo global artifacts theo fold/segment.
+4. Chuyển top local attributions thành versioned business reason codes.
+5. Không lưu raw account ID trong explanation artifact.
+6. Register exact evaluated artifact vào MLflow.
+7. Dùng aliases `candidate`, `challenger`, `champion`.
+8. Batch scorer:
+   - resolve alias thành exact version trước run;
+   - validate input signature/feature version;
+   - đọc bounded batches;
+   - ghi score, decision, reason codes và lineage;
+   - idempotent theo event/model/feature/policy version;
+   - fail closed nếu artifact không tải được.
+
+#### Score contract
+
+```text
+event_id
+prediction_score
+calibrated_probability
+risk_band
+alert_decision
+anomaly_score
+top_reason_codes
+model_name
+model_version
+feature_version
+calibration_version
+policy_version
+dataset_version
+scorer_git_sha
+scored_at
+```
+
+#### Exit criteria
+
+- Một score trace được về input event, feature, snapshot, code và exact model.
+- Rerun cùng version không tạo duplicate.
+- Rollback chỉ chuyển alias; không xóa prediction history.
+
+### M14 — Local LLM Fraud Case Copilot và Streamlit
+
+#### Mục tiêu học
+
+- Grounded generation, structured output, hallucination evaluation và
+  human-in-the-loop.
+- Phân biệt model prediction với natural-language explanation.
+
+#### LLM architecture
+
+```text
+Streamlit case request
+  → deterministic ClickHouse case query
+  → redact/hash identifiers
+  → structured evidence package
+  → Ollama local instruct model
+  → Pydantic JSON validation
+  → evidence/citation checks
+  → rendered case summary
+```
+
+Không cần RAG/vector database. Context được lấy bằng deterministic queries từ
+transaction, historical aggregates, graph signals, model score và reason codes.
+
+#### Local model selection
+
+1. Chọn 2–3 small instruct models quantized có thể chạy trong giới hạn máy.
+2. Benchmark tại thời điểm triển khai thay vì hard-code model name lâu dài.
+3. Đo:
+   - schema-valid rate;
+   - evidence coverage;
+   - unsupported-claim rate;
+   - latency;
+   - RAM/VRAM.
+4. Chọn model nhỏ nhất đạt quality gate.
+5. Temperature mặc định 0 và structured JSON schema.
+
+#### Output schema
+
+```text
+case_summary
+risk_factors[]
+supporting_evidence[]
+related_activity[]
+suggested_investigation_steps[]
+uncertainty_and_limitations[]
+source_event_ids[]
+prompt_version
+local_model_name
+```
+
+LLM không được:
+
+- thay đổi `prediction_score` hoặc `alert_decision`;
+- tuyên bố fraud đã được xác nhận nếu label chưa mature;
+- thêm số liệu không có trong evidence package;
+- hiển thị raw account identifier;
+- tự động thực hiện hành động bên ngoài hệ thống.
+
+#### LLM evaluation
+
+Tạo ít nhất 50 cases gồm:
+
+- true positive/false positive/false negative/true negative;
+- score cao nhưng anomaly thấp và ngược lại;
+- cold-start;
+- missing/inconsistent balance;
+- graph pattern;
+- insufficient evidence;
+- Ollama timeout hoặc malformed output.
+
+Mỗi case kiểm tra schema, evidence citation, factual consistency, uncertainty và
+forbidden claims. LLM eval report được version hóa theo prompt/model.
+
+#### Streamlit pages
+
+1. **Portfolio Overview** — architecture, dataset limits và demo flow.
+2. **Model Lab** — run comparison, PR/calibration/segment plots.
+3. **Alert Queue** — filter/rank theo score, amount, type và reason.
+4. **Case Investigation** — history, graph signals, SHAP reasons và copilot.
+5. **Monitoring** — data/model/policy health.
+
+#### Exit criteria
+
+- App vẫn hiển thị deterministic evidence khi Ollama unavailable.
+- Copilot output luôn qua Pydantic validation.
+- Unsupported-claim rate đạt threshold đã định trước.
+- Người dùng nhìn rõ đâu là model evidence và đâu là LLM-generated text.
+
+### M15 — Monitoring, feedback loop và end-to-end demo
+
+#### Mục tiêu học
+
+- Data drift, concept drift, delayed performance và retraining trigger.
+- Monitoring có hành động khác dashboard trang trí.
+
+#### Triển khai
+
+1. Data monitoring:
+   - freshness;
+   - schema/null/range;
+   - duplicate/reconciliation;
+   - feature distribution.
+2. Model monitoring:
+   - score distribution;
+   - alert volume;
+   - calibration;
+   - mature-cohort AUPRC/precision/recall@budget;
+   - segment regressions.
+3. System monitoring:
+   - scoring throughput/failure;
+   - MLflow/MinIO availability;
+   - Ollama latency/schema failures.
+4. Feedback contract:
+   - analyst outcome;
+   - observed time;
+   - label source/version;
+   - correction history.
+5. Drift chỉ mở investigation/retraining recommendation; không auto-retrain,
+   auto-promote hoặc auto-rollback.
+6. Tạo reproducible end-to-end demo script.
+
+#### Exit criteria
+
+- Demo trace được một transaction từ canonical data tới score, reasons, copilot
+  summary và delayed evaluation.
+- Monitoring metric có definition, window, threshold, owner và response action.
+- Restart services không làm mất MLflow/Optuna metadata hoặc artifacts.
+- README đủ để một người khác chạy smoke demo từ clean checkout.
+
+## 6. Tuning curriculum chi tiết
+
+Vì tuning là trọng tâm học tập, mỗi model phải đi qua các bước sau:
+
+1. Hiểu hyperparameter bằng một-variable-at-a-time experiment nhỏ.
+2. Xác định search space từ learning curve và model behavior, không copy space
+   từ Internet.
+3. Chạy random/TPE smoke study để bắt lỗi.
+4. Vẽ optimization history và parameter importance.
+5. Kiểm tra trial failures, OOM và overfitting.
+6. Thu hẹp search space có lý do.
+7. Retrain best config ngoài Optuna objective.
+8. So sánh best-tuned với strong default; tuning phải chứng minh lift.
+9. Đánh giá stability qua temporal folds.
+10. Ghi bài học vào experiment report.
+
+Search-space anti-patterns:
+
+- range quá rộng không có log scale;
+- tune parameter không ảnh hưởng model;
+- thay feature/split giữa trials;
+- dùng test metric làm objective;
+- chọn trial bằng một metric rồi bỏ qua constraints;
+- parallelism làm thiếu RAM và khiến comparison không công bằng;
+- coi Optuna `best_trial` là production model.
+
+## 7. Feature-engineering curriculum chi tiết
+
+Mỗi feature proposal phải có:
+
+```text
+name
+business hypothesis
+entity/grain
+source columns
+availability time
+lookback window
+SQL definition
+null/cold-start policy
+expected direction
+leakage risk
+compute cost
+validation test
+version
+```
+
+Quy trình feature experiment:
+
+1. Viết hypothesis trước.
+2. Implement point-in-time SQL.
+3. Chạy contract/temporal tests.
+4. Profile distribution và nulls.
+5. Benchmark incremental lift trên validation.
+6. Kiểm tra stability theo time/segment.
+7. Ablate để xác nhận đóng góp.
+8. Giữ, sửa hoặc loại bỏ bằng evidence.
+
+Không dùng feature importance duy nhất để quyết định feature. Phải kết hợp
+business validity, point-in-time correctness, stability, compute cost và model
+lift.
+
+## 8. Test strategy
+
+### Unit tests
+
+- Config/schema parsing.
+- Temporal split.
+- Metric và alert-budget calculations.
+- Calibration wrapper.
+- Model save/load.
+- Reason-code mapping.
+- LLM output validation.
+
+### Data/contract tests
+
+- dbt uniqueness/not-null/relationships.
+- Feature registry khớp physical schema.
+- Snapshot manifest/hash.
+- Model input signature.
+- Score schema.
+
+### Temporal/leakage tests
+
+- Future event invariance.
+- Future label isolation.
+- Preprocessing train-only fit.
+- Duplicate không qua nhiều split.
+- Same-timestamp deterministic ordering.
+
+### ML validation tests
+
+- Model tốt hơn dummy bằng minimum margin.
+- Prediction finite và nằm trong range.
+- Metric reproducible trong tolerance.
+- Serialization parity.
+- No severe segment regression.
+
+### Integration tests
+
+- Snapshot → train → MLflow.
+- Registry → score → ClickHouse.
+- Score/reasons → Streamlit.
+- Evidence → Ollama → validated JSON.
+
+### CI policy
+
+GitHub Actions chỉ chạy smoke data và small model fixtures. Full ClickHouse,
+full training, GPU, Ollama và end-to-end tests chạy local theo documented
+commands; không giả vờ CI free runner đại diện cho full environment.
+
+## 9. Resource và cost controls
+
+- Model training threads mặc định tối đa 8 để giữ máy responsive.
+- Optuna trials chạy tuần tự.
+- Chỉ giữ top-N large trial artifacts.
+- Snapshot và MLflow artifacts có retention policy.
+- Smoke tests không khởi động toàn bộ stack nếu không cần.
+- PyTorch bắt đầu bằng small batch và có CPU fallback.
+- Ollama chỉ load một model tại một thời điểm.
+- Tách service profiles để không chạy Airflow, MLflow, Streamlit và Ollama cùng
+  lúc khi milestone không cần.
+- Ghi wall time, CPU/RAM/GPU peak cho benchmark quan trọng.
+
+## 10. Command contract mục tiêu
+
+Tên command có thể được triển khai dần nhưng semantics phải ổn định:
 
 ```bash
-uv sync --frozen
+# Data quality và features
+./scripts/dbt.sh build
+uv run python scripts/build_training_snapshot.py --config configs/data/smoke.yaml
 
-make infra-up
-make buckets
-make clickhouse-bootstrap
-make replay-smoke LIMIT=1000 SPEED=100
-make spark-land
-make clickhouse-load LIMIT_FILES=10
-make reconcile
-make dbt-build TARGET=dev
-make snapshot DATASET_VERSION=...
-make mlflow-up
-make train CONFIG=ml/configs/baseline.yaml
-make tune CONFIG=ml/configs/optuna.yaml
-make evaluate RUN_ID=...
-make explain RUN_ID=...
-make register RUN_ID=...
-make promote MODEL_VERSION=... ALIAS=champion
-make score MODEL_ALIAS=champion
-make monitor MODEL_VERSION=...
-make superset-up
-make e2e
+# Baseline và benchmark
+uv run python scripts/train.py \
+  --model configs/models/logistic.yaml \
+  --data configs/data/benchmark.yaml
+
+uv run python scripts/evaluate.py --run-id <run_id>
+
+# Tuning
+uv run python scripts/tune.py \
+  --model lightgbm \
+  --config configs/tuning/lightgbm.yaml
+
+# Deep learning
+uv run python scripts/train.py \
+  --model configs/models/pytorch_mlp.yaml \
+  --data configs/data/benchmark.yaml
+
+# Promotion và scoring
+uv run python scripts/promote.py --run-id <run_id> --alias candidate
+uv run python scripts/score.py --model-alias champion
+
+# Monitoring và application
+uv run python scripts/monitor.py --model-alias champion
+uv run streamlit run streamlit_app/app.py
+
+# Quality
+uv run pytest
+uv run ruff check .
+uv run mypy ml/src
 ```
 
-CI commands phải self-terminating. Streaming demo có timeout/stop contract rõ ràng.
+## 11. Definition of Done cho toàn dự án
 
-## 22. Definition of Done
+### Data và features
 
-- [ ] Source manifest có SHA-256, row count, step range, schema và license note.
-- [ ] Transaction v2 có deterministic event time/sequence.
-- [ ] Label landing riêng và có observed delay thực.
-- [ ] Kafka → MinIO restart/replay được kiểm thử.
-- [ ] MinIO object → ClickHouse row có lineage đầy đủ.
-- [ ] Loader idempotent theo bucket/key/ETag và có crash recovery.
-- [ ] RAW append-only; CORE canonical correctness đã được kiểm thử.
-- [ ] dbt docs/tests/build artifacts đầy đủ.
-- [ ] Feature allowlist/denylist và contracts được version hóa.
-- [ ] Point-in-time tests pass.
-- [ ] Immutable snapshot có manifest/hash và rebuild parity.
-- [ ] Temporal split manifest được lưu.
-- [ ] Dummy, Logistic Regression và tree challenger được đánh giá.
-- [ ] AUPRC, recall/precision@budget, calibration và uncertainty có trong report.
-- [ ] MLflow Tracking dùng PostgreSQL metadata và MinIO artifacts.
-- [ ] Mọi run có required tags/metrics/artifacts.
-- [ ] Optuna study resume được và trial trace tới MLflow.
-- [ ] SHAP qua additivity/stability/privacy checks.
-- [ ] MLflow Registry là registry duy nhất.
-- [ ] Promotion, aliases, approval, parity và rollback được kiểm thử.
-- [ ] Batch score trace được về model/data/feature/policy versions.
-- [ ] Delayed-label evaluation báo coverage/sample size.
-- [ ] Monitoring phân biệt drift và mature performance.
-- [ ] Superset chỉ đọc MART/MONITORING.
-- [ ] Secrets/raw identifiers không xuất hiện trong Git/log/dashboard.
-- [ ] End-to-end test reconcile mọi boundary.
-- [ ] README, DATA_CONTRACT và MODEL_CARD nêu rõ giới hạn synthetic data.
+- Canonical grain và delayed-label semantics được test.
+- Feature set point-in-time correct và versioned.
+- Immutable snapshot có manifest/hash và build reproducible.
 
-## 23. Rủi ro và giới hạn
+### ML
 
-### 23.1 Synthetic-to-real gap
+- Có dummy, rule, linear, nhiều tree libraries, deep learning và anomaly
+  experiments.
+- Model comparison dùng temporal folds và cùng resource/evaluation contract.
+- Tuning có resumable study, pruning, report và retrain parity.
+- Test chỉ được mở sau khi model/feature/policy khóa.
+- Champion có calibration, policy, model card và segment analysis.
 
-PaySim không phản ánh đầy đủ fraud adaptation, concept drift, investigation workflow hoặc regulatory constraints. Kết quả chỉ chứng minh phương pháp và engineering capability.
+### MLOps
 
-### 23.2 Event-time và delayed-label gap
+- Mọi run trace được về dataset/feature/split/code/config.
+- Registry load/reload/rollback pass.
+- Scoring idempotent và có full lineage.
+- Monitoring dùng mature-label cohorts.
 
-Mọi feature/model trước khi hoàn thành M1 chỉ là prototype, không được dùng làm final evidence.
+### LLM và application
 
-### 23.3 ClickHouse deduplication semantics
+- Ollama chạy local, không cần paid API.
+- Copilot grounded trên deterministic evidence và structured output.
+- LLM eval suite kiểm tra factuality/unsupported claims.
+- Streamlit có model lab, alert queue, case investigation và monitoring.
 
-`ReplacingMergeTree` xử lý duplicate bất đồng bộ. Canonical reads, counts và ML snapshots phải dùng patterns đã test; không giả định database enforce unique key kiểu OLTP.
+### Engineering
 
-### 23.4 Point-in-time SQL complexity
+- Unit/contract/temporal/integration tests phù hợp đều pass.
+- Secret, dataset, model binary và generated artifacts không nằm trong Git.
+- Clean-checkout smoke guide hoạt động.
+- Tài liệu nói rõ PaySim là synthetic và không chứng minh production banking
+  performance.
 
-Rolling windows, tied timestamps và out-of-order events dễ gây leakage. Golden fixtures và future-row invariance tests là release gate bắt buộc.
+## 12. Những điều không được dùng làm bằng chứng thành công
 
-### 23.5 Self-hosted operations
+- Accuracy cao trên imbalanced dataset.
+- ROC-AUC cao nhưng precision/recall@budget thấp.
+- Random split đẹp hơn temporal split.
+- Tuning trên test set.
+- Một SHAP plot không có stability/leakage review.
+- Deep model phức tạp nhưng không thắng strong tree baseline.
+- LLM summary nghe thuyết phục nhưng không cite evidence.
+- Dashboard đẹp nhưng model/data lineage không truy được.
+- Claim “production-ready banking fraud” dựa trên PaySim synthetic.
 
-Local stack cần tự quản lý disk, backups, upgrades, memory limits và service credentials. Single-node demo không đại diện production HA.
+## 13. Tài liệu chính thức nên dùng khi triển khai
 
-### 23.6 Batch-first limitation
+- scikit-learn model selection và metrics:
+  <https://scikit-learn.org/stable/model_selection.html>
+- scikit-learn probability calibration:
+  <https://scikit-learn.org/stable/modules/calibration.html>
+- XGBoost Python/scikit-learn interface:
+  <https://xgboost.readthedocs.io/en/stable/python/>
+- LightGBM Python API:
+  <https://lightgbm.readthedocs.io/en/stable/Python-API.html>
+- CatBoost documentation:
+  <https://catboost.ai/docs/>
+- PyTorch documentation:
+  <https://docs.pytorch.org/docs/stable/>
+- Optuna:
+  <https://optuna.readthedocs.io/en/stable/>
+- MLflow traditional ML:
+  <https://mlflow.org/docs/latest/ml/traditional-ml/>
+- SHAP:
+  <https://shap.readthedocs.io/en/latest/>
+- Polars Lazy API:
+  <https://docs.pola.rs/user-guide/lazy/>
+- Ollama structured outputs:
+  <https://docs.ollama.com/capabilities/structured-outputs>
+- Streamlit:
+  <https://docs.streamlit.io/>
+- dbt data tests:
+  <https://docs.getdbt.com/docs/build/data-tests>
 
-Đây là near-real-time landing + micro-batch scoring, không phải real-time fraud blocking. Online inference chỉ được xem xét khi đã có latency/freshness SLO và offline/online parity tests.
+## 14. Việc bắt đầu ngay
 
-### 23.7 Toolchain complexity
+Chỉ bắt đầu M0. Không cài toàn bộ ML stack và dựng mọi service trong một lần.
 
-PostgreSQL, MLflow và Superset thêm stateful services. Triển khai tuần tự theo milestones; giữ manual commands hoạt động trước orchestration.
+Thứ tự phiên làm việc tiếp theo:
 
-## 24. Thứ tự bắt đầu khuyến nghị
+1. Khôi phục Docker integration trong WSL.
+2. Chốt dependency groups và scaffold `fraudguard_ml`.
+3. Thêm config/test/quality foundation.
+4. Chạy development gate.
+5. Chuyển sang M1 và hoàn thiện canonical dbt models.
 
-1. Hoàn thành M0–M2 trước khi thêm ClickHouse.
-2. Dựng ClickHouse DDL và loader nhỏ trên fixture.
-3. Chuyển CORE/data quality vào dbt.
-4. Chứng minh point-in-time correctness trước khi train model.
-5. Tạo immutable snapshot trước khi dựng MLflow.
-6. Train baseline trước tuning/challenger.
-7. Dùng MLflow Registry chỉ sau khi artifact reload parity pass.
-8. Score batch trước monitoring/dashboard.
-9. Chỉ thêm orchestration hoặc online inference khi batch pipeline hoàn chỉnh.
-
-## 25. Tài liệu chính thức
-
-- ClickHouse documentation: <https://clickhouse.com/docs>
-- ClickHouse S3 integration: <https://clickhouse.com/integrations/amazon_s3>
-- ClickHouse Kafka integration: <https://clickhouse.com/integrations/kafka>
-- ClickHouse + dbt: <https://clickhouse.com/integrations/dbt>
-- ClickHouse Python integration: <https://clickhouse.com/integrations/python>
-- ClickHouse + Superset: <https://clickhouse.com/integrations/superset>
-- dbt tests: <https://docs.getdbt.com/docs/build/data-tests>
-- MLflow Tracking: <https://mlflow.org/docs/latest/ml/tracking/>
-- MLflow Model Registry: <https://mlflow.org/docs/latest/ml/model-registry/>
-- MLflow self-hosting: <https://mlflow.org/docs/latest/self-hosting/architecture/>
-- Optuna: <https://optuna.readthedocs.io/en/stable/>
-- SHAP: <https://shap.readthedocs.io/en/latest/>
-- Superset database connections: <https://superset.apache.org/user-docs/databases/>
+Khi M1 chưa pass, chưa train model “thử cho biết”. Một model học từ grain sai,
+duplicate hoặc future label chỉ tạo ra metric đẹp nhưng không tạo ra kiến thức
+ML đáng tin cậy.

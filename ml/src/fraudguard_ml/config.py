@@ -49,3 +49,4 @@ def load_yaml_config(path: Path, model_type: type[ConfigT]) -> ConfigT:
         )
 
     return model_type.model_validate(raw_data)
+

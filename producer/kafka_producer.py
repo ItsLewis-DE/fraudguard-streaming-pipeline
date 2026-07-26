@@ -6,10 +6,10 @@ import logging
 import os
 import time
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime,timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Mapping
 
 from confluent_kafka import Message, Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -22,9 +22,9 @@ DEFAULT_SCHEMA_REGISTRY_URL = "http://localhost:8081"
 TRANSACTION_SCHEMA_PATH = PROJECT_ROOT / "schemas" / "fraud_transaction.avsc"
 LABEL_SCHEMA_PATH = PROJECT_ROOT / "schemas" / "fraud_transaction_label.avsc"
 
-REPLAY_EPOCH = datetime(2026,1,1,tzinfo=timezone.utc)
+REPLAY_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 REPLAY_EPOCH_MS = int(REPLAY_EPOCH.timestamp() * 1000)
-STEP_DURATION_MS = 60*60*1000
+STEP_DURATION_MS = 60 * 60 * 1000
 
 LOGGER = logging.getLogger("paysim-producer")
 
@@ -96,9 +96,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--schema-registry-url",
-        default=os.getenv(
-            "PAYSIM_SCHEMA_REGISTRY_URL", DEFAULT_SCHEMA_REGISTRY_URL
-        ),
+        default=os.getenv("PAYSIM_SCHEMA_REGISTRY_URL", DEFAULT_SCHEMA_REGISTRY_URL),
     )
     parser.add_argument(
         "--transaction-topic",
@@ -140,12 +138,14 @@ def build_producer(bootstrap_servers: str) -> Producer:
         {
             "bootstrap.servers": bootstrap_servers,
             "client.id": "paysim-csv-producer",
-            "acks": "all", #Kafka chỉ xác nhận message khi tất cả các replica đã ghi message
-            "enable.idempotence": True, #Bật tính năng này để tránh producer gửi trùng dữ liệu
-            "retries": 2_147_483_647, 
+            # Chỉ xác nhận sau khi mọi in-sync replica đã ghi message.
+            "acks": "all",
+            # Ngăn producer tạo bản sao khi retry trong cùng một phiên.
+            "enable.idempotence": True,
+            "retries": 2_147_483_647,
             "max.in.flight.requests.per.connection": 5,
             "compression.type": "snappy",
-            "linger.ms": 20, #thêm một độ trễ tối đa vào lô message
+            "linger.ms": 20,  # thêm một độ trễ tối đa vào lô message
             "batch.num.messages": 10_000,
             "delivery.timeout.ms": 120_000,
         }
@@ -170,18 +170,19 @@ def build_serializers(
     )
     return transaction_serializer, label_serializer
 
-def count_rows_per_step(data_path:str) -> Counter[int]:
-    counts: Counter[int] = Counter() 
+
+def count_rows_per_step(data_path: Path) -> Counter[int]:
+    counts: Counter[int] = Counter()
     with data_path.open("rb") as csv_file:
-        raw_header = csv_file.readline() 
+        raw_header = csv_file.readline()
         if not raw_header:
             raise ValueError("file CSV rỗng!")
         header = next(csv.reader([raw_header.decode("utf-8")]))
         validate_header(header)
         step_index = header.index("step")
-        for row_number,raw_row in enumerate(csv_file,start=1):
+        for row_number, raw_row in enumerate(csv_file, start=1):
             if not raw_row.strip():
-                continue 
+                continue
             columns = raw_row.split(b",")
             try:
                 step = int(columns[step_index])
@@ -194,7 +195,8 @@ def count_rows_per_step(data_path:str) -> Counter[int]:
             counts[step] += 1
     if not counts:
         raise ValueError("CSV contains no data rows")
-    return counts 
+    return counts
+
 
 def deterministic_event_time_ms(
     *,
@@ -208,18 +210,18 @@ def deterministic_event_time_ms(
     if rows_in_step < 1:
         raise ValueError("rows_in_step must be >= 1")
     if not 0 <= ordinal_within_step < rows_in_step:
-        raise ValueError(
-            "ordinal_within_step must be between 0 and rows_in_step - 1"
-        )
+        raise ValueError("ordinal_within_step must be between 0 and rows_in_step - 1")
 
     offset_ms = ordinal_within_step * STEP_DURATION_MS // rows_in_step
     return REPLAY_EPOCH_MS + (step - 1) * STEP_DURATION_MS + offset_ms
+
 
 def validate_header(fieldnames: list[str] | None) -> None:
     actual = set(fieldnames or [])
     missing = REQUIRED_COLUMNS - actual
     if missing:
         raise ValueError(f"CSV is missing required columns: {sorted(missing)}")
+
 
 def convert_paysim_row(
     row: Mapping[str, str],
@@ -228,7 +230,7 @@ def convert_paysim_row(
     ordinal_within_step: int,
     rows_in_step: int,
 ) -> tuple[dict[str, object], dict[str, object]]:
-    
+
     event_id = f"paysim-{row_number:010d}"
     ingested_at = int(time.time() * 1000)
     step = int(row["step"])
@@ -243,7 +245,7 @@ def convert_paysim_row(
         "source": "paysim",
         "event_time": event_time,
         "ingested_at": ingested_at,
-        "step":step,
+        "step": step,
         "type": row["type"],
         "amount": float(row["amount"]),
         "nameOrig": row["nameOrig"],
@@ -291,9 +293,7 @@ def produce_with_backpressure(
                 topic=topic,
                 key=key,
                 value=value,
-                headers={
-                    "content-type": "application/vnd.apache.avro+binary"
-                },
+                headers={"content-type": "application/vnd.apache.avro+binary"},
                 on_delivery=stats.callback,
             )
             return
@@ -339,13 +339,18 @@ def replay_csv(
         for row_number, row in enumerate(reader, start=1):
             step = int(row["step"])
             ordinals_within_step = ordinals_by_step[step]
-            ordinals_by_step[step]+=1
+            ordinals_by_step[step] += 1
             if row_number <= skip_rows:
                 continue
             if max_records is not None and published >= max_records:
                 break
 
-            event, label = convert_paysim_row(row, row_number,ordinal_within_step=ordinals_within_step,rows_in_step=rows_per_step[step])
+            event, label = convert_paysim_row(
+                row,
+                row_number,
+                ordinal_within_step=ordinals_within_step,
+                rows_in_step=rows_per_step[step],
+            )
             event_id = str(event["event_id"])
             event_value = serialize_avro(
                 transaction_serializer,

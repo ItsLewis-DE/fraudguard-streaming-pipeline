@@ -1,0 +1,28 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --check
+        language: system
+        types: [python]
+
+      - id: mypy
+        name: mypy
+        entry: uv run mypy ml/src/fraudguard_ml ml/tests
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: pytest-smoke
+        name: pytest smoke
+        entry: uv run pytest -m smoke --no-cov
+        language: system
+        pass_filenames: false
+        types: [python]

@@ -16,3 +16,11 @@ airflow/logs/
 # The PaySim dataset is larger than GitHub's regular file limit.
 data/*.csv
 !data/.gitkeep
+
+# Test-generated artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Python packaging metadata
+*.egg-info/

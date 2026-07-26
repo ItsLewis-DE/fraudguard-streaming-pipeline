@@ -1,9 +1,8 @@
 import os
 
+from kafka_minio_landing import LandingConfig, run_landing
 from pyspark.sql import Column
 from pyspark.sql.functions import lit, when
-
-from kafka_minio_landing import LandingConfig, run_landing
 
 
 def label_validation_reason(record: Column) -> Column:

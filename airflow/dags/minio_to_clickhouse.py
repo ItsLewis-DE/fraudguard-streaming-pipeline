@@ -10,16 +10,13 @@ import pendulum
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.sdk import dag, get_current_context, task
 
-
 LOGGER = logging.getLogger(__name__)
 
 MINIO_CONNECTION_ID = "minio_s3"
 CLICKHOUSE_CONNECTION_ID = "clickhouse_http"
 MAX_BATCHES_PER_RUN = 200
 
-BATCH_MARKER_PATTERN = re.compile(
-    r"^batch_id=(?P<batch_id>[0-9]{20})/_SUCCESS$"
-)
+BATCH_MARKER_PATTERN = re.compile(r"^batch_id=(?P<batch_id>[0-9]{20})/_SUCCESS$")
 
 PIPELINES = (
     {
@@ -154,11 +151,11 @@ VALUES
     {error_message:String}
 )
 """
+
+
 # Khi triển khai lên server thật, chỉ cần cấu hình lại Airflow Connections.
 def get_clickhouse_client():
-    connection = get_current_context()["conn"].get(
-        CLICKHOUSE_CONNECTION_ID
-    )
+    connection = get_current_context()["conn"].get(CLICKHOUSE_CONNECTION_ID)
     if not connection.host or not connection.login:
         raise ValueError("ClickHouse connection is incomplete")
     return clickhouse_connect.get_client(
@@ -169,6 +166,7 @@ def get_clickhouse_client():
         database=connection.schema or "fraudguard",
         secure=connection.conn_type == "https",
     )
+
 
 # Hàm này trả về các thông tin runtime cần thiết của MinIO.
 def get_minio_runtime() -> tuple[S3Hook, str, str, str]:
@@ -187,6 +185,7 @@ def get_minio_runtime() -> tuple[S3Hook, str, str, str]:
         frozen.access_key,
         frozen.secret_key,
     )
+
 
 @dag(
     dag_id="minio_to_clickhouse",
@@ -218,21 +217,19 @@ def minio_to_clickhouse():
             """
             )
             table_count = int(result.result_rows[0][0])
-            if table_count !=3:
-                raise RuntimeError(
-                    "Run the DDL before enabling this DAG"
-                )
+            if table_count != 3:
+                raise RuntimeError("Run the DDL before enabling this DAG")
         finally:
             client.close()
 
     @task
     def discover_batches() -> list[dict[str, Any]]:
-        hook,_,_,_ = get_minio_runtime()
+        hook, _, _, _ = get_minio_runtime()
         client = get_clickhouse_client()
         try:
-            loaded ={
-                (str(pipeline),int(batch_id)) 
-                for pipeline,batch_id in client.query(
+            loaded = {
+                (str(pipeline), int(batch_id))
+                for pipeline, batch_id in client.query(
                     """
                     SELECT pipeline,batch_id 
                     FROM ingestion_batches FINAL
@@ -242,10 +239,13 @@ def minio_to_clickhouse():
             }
             discovered: list[dict[str, Any]] = []
             for config in PIPELINES:
-                keys = hook.list_keys(
-                    bucket_name=config["bucket"],
-                    prefix="batch_id=",
-                ) or []
+                keys = (
+                    hook.list_keys(
+                        bucket_name=config["bucket"],
+                        prefix="batch_id=",
+                    )
+                    or []
+                )
 
                 for key in keys:
                     match = BATCH_MARKER_PATTERN.fullmatch(key)
@@ -267,9 +267,7 @@ def minio_to_clickhouse():
                         }
                     )
 
-            discovered.sort(
-                key=lambda item: (item["pipeline"], item["batch_id"])
-            )
+            discovered.sort(key=lambda item: (item["pipeline"], item["batch_id"]))
             selected = discovered[:MAX_BATCHES_PER_RUN]
             LOGGER.info(
                 "Discovered %s pending batches; selected %s",

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS fraudguard.transactions
     minio_object                String,
     loaded_at                   DateTime64(3, 'UTC') DEFAULT now64(3)
 )
-ENGINE = ReplacingMergeTree(ingested_at)
+ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (source, event_id)
 SETTINGS index_granularity = 8192;
@@ -34,8 +34,6 @@ CREATE TABLE IF NOT EXISTS fraudguard.transaction_labels
 (
     event_id          String,
     source            LowCardinality(String),
-    observed_at       DateTime64(3, 'UTC'),
-    observed_date     Date MATERIALIZED toDate(observed_at),
     is_fraud          UInt8,
     is_flagged_fraud  UInt8,
     schema_id         UInt32,
@@ -47,7 +45,8 @@ CREATE TABLE IF NOT EXISTS fraudguard.transaction_labels
     minio_object      String,
     loaded_at         DateTime64(3, 'UTC') DEFAULT now64(3)
 )
-ENGINE = ReplacingMergeTree(observed_at)
+ENGINE = MergeTree
+-- Keep every replay of an event in the same partition for canonicalization.
 PARTITION BY cityHash64(event_id) % 32
 ORDER BY (source, event_id)
 SETTINGS index_granularity = 8192;
@@ -56,15 +55,15 @@ CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batches
 (
     pipeline       LowCardinality(String),
     batch_id       UInt64,
-    source_rows    UInt64,
     status         Enum8('success' = 1, 'failed' = 2),
     source_prefix  String,
     airflow_run_id String DEFAULT '',
     finished_at    DateTime64(3, 'UTC'),
     error_message  String DEFAULT ''
 )
-ENGINE = ReplacingMergeTree(finished_at)
-ORDER BY (pipeline, batch_id);
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(finished_at)
+ORDER BY (pipeline, batch_id, finished_at, airflow_run_id);
 
 CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batch_quality
 (
@@ -76,12 +75,8 @@ CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batch_quality
     valid_rows        UInt64,
     quarantine_rows   UInt64,
     duplicate_rows    UInt64 DEFAULT 0,
-    recorded_at       DateTime64(3, 'UTC')
+    loaded_at         DateTime64(3, 'UTC') DEFAULT now64(3)
 )
-ENGINE = ReplacingMergeTree(recorded_at)
-ORDER BY (
-    pipeline,
-    batch_id,
-    ifNull(event_date, toDate('1970-01-01')),
-    source
-);
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(loaded_at)
+ORDER BY (pipeline,batch_id)

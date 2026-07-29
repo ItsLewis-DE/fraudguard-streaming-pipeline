@@ -24,3 +24,5 @@ htmlcov/
 
 # Python packaging metadata
 *.egg-info/
+
+AGENTS.md

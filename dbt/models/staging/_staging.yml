@@ -1,0 +1,72 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: One row per physical transaction row loaded into ClickHouse.
+    columns:
+      - name: source
+        data_tests: [not_null]
+      - name: event_id
+        data_tests: [not_null]
+      - name: event_time
+        data_tests: [not_null]
+      - name: minio_batch_id
+        data_tests: [not_null]
+      - name: kafka_offset
+        data_tests: [not_null]
+
+  - name: stg_transaction_labels
+    description: One row per physical final-label row.
+    columns:
+      - name: source
+        data_tests: [not_null]
+      - name: event_id
+        data_tests: [not_null]
+      - name: is_fraud
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_flagged_fraud
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
+  - name: stg_ingestion_batches
+    description: One row per Airflow load attempt.
+    columns:
+      - name: pipeline
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["transactions", "labels"]
+      - name: batch_id
+        data_tests: [not_null]
+      - name: status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["success", "failed"]
+
+  - name: stg_ingestion_batch_quality
+    description: One physical quality-manifest row per batch/date/source.
+    columns:
+      - name: pipeline
+        data_tests: [not_null]
+      - name: batch_id
+        data_tests: [not_null]
+      - name: source
+        data_tests: [not_null]
+      - name: input_rows
+        data_tests: [not_null]
+      - name: valid_rows
+        data_tests: [not_null]
+      - name: quarantine_rows
+        data_tests: [not_null]
+      - name: duplicate_rows
+        data_tests: [not_null]

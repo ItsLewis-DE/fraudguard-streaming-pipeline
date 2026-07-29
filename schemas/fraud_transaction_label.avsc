@@ -5,13 +5,6 @@
   "fields": [
     {"name": "event_id", "type": "string"},
     {"name": "source", "type": "string"},
-    {
-      "name": "observed_at",
-      "type": {
-        "type": "long",
-        "logicalType": "timestamp-millis"
-      }
-    },
     {"name": "isFraud", "type": "int"},
     {"name": "isFlaggedFraud", "type": "int"}
   ]

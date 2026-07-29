@@ -65,3 +65,23 @@ CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batches
 )
 ENGINE = ReplacingMergeTree(finished_at)
 ORDER BY (pipeline, batch_id);
+
+CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batch_quality
+(
+    pipeline          LowCardinality(String),
+    batch_id          UInt64,
+    event_date        Nullable(Date),
+    source             LowCardinality(String),
+    input_rows        UInt64,
+    valid_rows        UInt64,
+    quarantine_rows   UInt64,
+    duplicate_rows    UInt64 DEFAULT 0,
+    recorded_at       DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(recorded_at)
+ORDER BY (
+    pipeline,
+    batch_id,
+    ifNull(event_date, toDate('1970-01-01')),
+    source
+);

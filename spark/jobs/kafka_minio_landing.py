@@ -1,9 +1,9 @@
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -77,9 +77,7 @@ def load_schema_catalog_once(
     )
 
     if not versions:
-        raise RuntimeError(
-            f"Subject chua co schema version: {subject}"
-        )
+        raise RuntimeError(f"Subject chua co schema version: {subject}")
     entries = [
         registry_get(
             registry_url,
@@ -91,10 +89,7 @@ def load_schema_catalog_once(
         entries,
         key=lambda entry: int(entry["version"]),
     )
-    writer_schemas = {
-        int(entry["id"]): entry["schema"]
-        for entry in entries
-    }
+    writer_schemas = {int(entry["id"]): entry["schema"] for entry in entries}
 
     return SchemaCatalog(
         subject=subject,
@@ -139,9 +134,7 @@ def load_schema_catalog(
             )
             time.sleep(retry_seconds)
 
-    raise RuntimeError(
-        f"Cannot load schema catalog for {subject}"
-    ) from last_error
+    raise RuntimeError(f"Cannot load schema catalog for {subject}") from last_error
 
 
 def inspect_confluent_message(
@@ -151,18 +144,13 @@ def inspect_confluent_message(
     supported_schema_ids = sorted(catalog.writer_schemas)
 
     inspected_df = (
-        kafka_df
-        .withColumn(
+        kafka_df.withColumn(
             "magic_byte",
-            expr(
-                "CAST(conv(hex(substring(value, 1, 1)), 16, 10) AS INT)"
-            ),
+            expr("CAST(conv(hex(substring(value, 1, 1)), 16, 10) AS INT)"),
         )
         .withColumn(
             "message_schema_id",
-            expr(
-                "CAST(conv(hex(substring(value, 2, 4)), 16, 10) AS BIGINT)"
-            ),
+            expr("CAST(conv(hex(substring(value, 2, 4)), 16, 10) AS BIGINT)"),
         )
         .withColumn("value_size", length(col("value")))
         .withColumn("avro_payload", expr("substring(value, 6)"))
@@ -185,9 +173,7 @@ def inspect_confluent_message(
                 lit("INVALID_CONFLUENT_MAGIC_BYTE"),
             )
             .when(
-                ~col("message_schema_id").isin(
-                    *supported_schema_ids
-                ),
+                ~col("message_schema_id").isin(*supported_schema_ids),
                 lit("UNSUPPORTED_SCHEMA_ID"),
             )
             .otherwise(lit(None).cast("string")),
@@ -204,25 +190,17 @@ def decode_supported_schemas(
 ) -> DataFrame:
     branches = []
 
-    for schema_id, writer_schema in sorted(
-        catalog.writer_schemas.items()
-    ):
-        branch = (
-            df
-            .filter(
-                col("message_schema_id") == lit(schema_id)
-            )
-            .withColumn(
-                record_column,
-                from_avro(
-                    col("avro_payload"),
-                    writer_schema,
-                    {
-                        "mode": "PERMISSIVE",
-                        "avroSchema": catalog.reader_schema,
-                    },
-                ),
-            )
+    for schema_id, writer_schema in sorted(catalog.writer_schemas.items()):
+        branch = df.filter(col("message_schema_id") == lit(schema_id)).withColumn(
+            record_column,
+            from_avro(
+                col("avro_payload"),
+                writer_schema,
+                {
+                    "mode": "PERMISSIVE",
+                    "avroSchema": catalog.reader_schema,
+                },
+            ),
         )
         branches.append(branch)
 
@@ -242,8 +220,7 @@ def prepare_quarantine(df: DataFrame) -> DataFrame:
     """Keep the original Kafka bytes so failed messages can be replayed."""
 
     return (
-        df
-        .select(
+        df.select(
             "quarantine_reason",
             "reader_schema_id",
             "message_schema_id",
@@ -254,9 +231,7 @@ def prepare_quarantine(df: DataFrame) -> DataFrame:
             col("offset").alias("kafka_offset"),
             col("timestamp").alias("kafka_timestamp"),
             base64(col("key")).alias("kafka_key_base64"),
-            base64(col("value")).alias(
-                "kafka_value_base64"
-            ),
+            base64(col("value")).alias("kafka_value_base64"),
         )
         .withColumn(
             "quarantined_at",
@@ -282,28 +257,26 @@ def build_process_batch(
 
         try:
             header_quarantine_df = prepare_quarantine(
-                batch_df.filter(
-                    col("quarantine_reason").isNotNull()
+                batch_df.filter(col("quarantine_reason").isNotNull())
+            )
+
+            supported_df = batch_df.filter(col("quarantine_reason").isNull())
+
+            decoded_df = (
+                decode_supported_schemas(
+                    supported_df,
+                    catalog,
+                    config.record_column,
                 )
+                .withColumn(
+                    "quarantine_reason",
+                    config.validation_reason_builder(col(config.record_column)),
+                )
+                .persist(StorageLevel.MEMORY_AND_DISK)
             )
-
-            supported_df = batch_df.filter(
-                col("quarantine_reason").isNull()
-            )
-
-            decoded_df = decode_supported_schemas(
-                supported_df,
-                catalog,
-                config.record_column,
-            ).withColumn(
-                "quarantine_reason",
-                config.validation_reason_builder(col(config.record_column)),
-            ).persist(StorageLevel.MEMORY_AND_DISK)
 
             decode_failed_df = prepare_quarantine(
-                decoded_df.filter(
-                    col("quarantine_reason").isNotNull()
-                )
+                decoded_df.filter(col("quarantine_reason").isNotNull())
             )
             quarantine_df = header_quarantine_df.unionByName(
                 decode_failed_df,
@@ -311,8 +284,7 @@ def build_process_batch(
             )
 
             valid_df = (
-                decoded_df
-                .filter(col("quarantine_reason").isNull())
+                decoded_df.filter(col("quarantine_reason").isNull())
                 .select(
                     f"{config.record_column}.*",
                     "message_schema_id",
@@ -331,25 +303,19 @@ def build_process_batch(
 
             if not valid_df.isEmpty():
                 (
-                    valid_df.write
-                    .mode("overwrite")
+                    valid_df.write.mode("overwrite")
                     .partitionBy(config.partition_column)
-                    .parquet(
-                        f"{config.valid_path}/batch_id={batch_partition}"
-                    )
+                    .parquet(f"{config.valid_path}/batch_id={batch_partition}")
                 )
 
             if not quarantine_df.isEmpty():
                 (
-                    quarantine_df.write
-                    .mode("overwrite")
+                    quarantine_df.write.mode("overwrite")
                     .partitionBy(
                         "quarantine_reason",
                         "kafka_date",
                     )
-                    .parquet(
-                        f"{config.quarantine_path}/batch_id={batch_partition}"
-                    )
+                    .parquet(f"{config.quarantine_path}/batch_id={batch_partition}")
                 )
 
             logger.info(
@@ -375,16 +341,11 @@ def run_landing(config: LandingConfig) -> None:
         config.schema_subject,
     )
 
-    spark = (
-        SparkSession.builder
-        .appName(config.app_name)
-        .getOrCreate()
-    )
+    spark = SparkSession.builder.appName(config.app_name).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
     kafka_df = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option(
             "kafka.bootstrap.servers",
             config.kafka_bootstrap_servers,
@@ -404,8 +365,7 @@ def run_landing(config: LandingConfig) -> None:
     )
 
     logger.info(
-        "Starting topic=%s valid_path=%s "
-        "quarantine_path=%s checkpoint_path=%s",
+        "Starting topic=%s valid_path=%s quarantine_path=%s checkpoint_path=%s",
         config.kafka_topic,
         config.valid_path,
         config.quarantine_path,
@@ -413,8 +373,7 @@ def run_landing(config: LandingConfig) -> None:
     )
 
     query = (
-        inspected_df.writeStream
-        .foreachBatch(build_process_batch(config, catalog))
+        inspected_df.writeStream.foreachBatch(build_process_batch(config, catalog))
         .option("checkpointLocation", config.checkpoint_path)
         .trigger(processingTime=config.trigger_interval)
         .start()

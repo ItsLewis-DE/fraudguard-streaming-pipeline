@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
@@ -28,10 +28,10 @@ class SmokeConfig(StrictModel):
     runtime: RuntimeConfig
 
 
-ConfigT = TypeVar("ConfigT", bound=BaseModel)
-
-
-def load_yaml_config(path: Path, model_type: type[ConfigT]) -> ConfigT:
+def load_yaml_config[ConfigT: BaseModel](
+    path: Path,
+    model_type: type[ConfigT],
+) -> ConfigT:
     try:
         raw_text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -44,9 +44,7 @@ def load_yaml_config(path: Path, model_type: type[ConfigT]) -> ConfigT:
 
     if not isinstance(raw_data, dict):
         raise ValueError(
-            f"Config root must be a mapping, got "
-            f"{type(raw_data).__name__}: {path}"
+            f"Config root must be a mapping, got {type(raw_data).__name__}: {path}"
         )
 
     return model_type.model_validate(raw_data)
-

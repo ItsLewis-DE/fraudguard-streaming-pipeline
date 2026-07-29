@@ -8,6 +8,8 @@ from pydantic import ValidationError
 
 from fraudguard_ml.config import SmokeConfig, load_yaml_config
 
+pytestmark = pytest.mark.smoke
+
 
 def _valid_config_data(
     *,
@@ -28,6 +30,7 @@ def _valid_config_data(
         "runtime": runtime,
     }
 
+
 def _write_yaml(tmp_path: Path, data: Any) -> Path:
     config_path = tmp_path / "smoke.yaml"
     config_path.write_text(
@@ -36,7 +39,8 @@ def _write_yaml(tmp_path: Path, data: Any) -> Path:
     )
     return config_path
 
-#Nếu pass nghĩa là một file YMAL hợp lệ đi qua load thì nó không bị thay đổi 
+
+# Nếu pass nghĩa là một file YMAL hợp lệ đi qua load thì nó không bị thay đổi
 def test_loads_valid_yaml(tmp_path: Path) -> None:
     config_path = _write_yaml(tmp_path, _valid_config_data())
 
@@ -62,6 +66,7 @@ def test_rejects_missing_config_file(tmp_path: Path) -> None:
 
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
+
 def test_rejects_malformed_yaml(tmp_path: Path) -> None:
     config_path = tmp_path / "smoke.yaml"
     config_path.write_text(
@@ -77,29 +82,23 @@ def test_rejects_malformed_yaml(tmp_path: Path) -> None:
 
     assert isinstance(exc_info.value.__cause__, yaml.YAMLError)
 
-@pytest.mark.parametrize(
-    ("raw_yaml","root_type"),
-    [
-        ("- first\n- second\n","list"),
-        ("42\n","int"),
-        ("null\n","NoneType")
-    ],
-    ids=["list","scalar","null"],
-)
 
+@pytest.mark.parametrize(
+    ("raw_yaml", "root_type"),
+    [("- first\n- second\n", "list"), ("42\n", "int"), ("null\n", "NoneType")],
+    ids=["list", "scalar", "null"],
+)
 def test_rejects_non_mapping_yaml_root(
-    tmp_path:Path,
-    raw_yaml:str,
-    root_type:str
-) ->None:
+    tmp_path: Path, raw_yaml: str, root_type: str
+) -> None:
     config_path = tmp_path / "smoke.yaml"
-    config_path.write_text(raw_yaml,encoding="utf-8")
+    config_path.write_text(raw_yaml, encoding="utf-8")
 
     with pytest.raises(
-        ValueError,
-        match=rf"Config root must be a mapping, got {root_type}:"
+        ValueError, match=rf"Config root must be a mapping, got {root_type}:"
     ):
-        load_yaml_config(config_path,SmokeConfig)
+        load_yaml_config(config_path, SmokeConfig)
+
 
 def _assert_validation_error(
     error: ValidationError,
@@ -111,6 +110,7 @@ def _assert_validation_error(
         tuple(item["loc"]) == location and item["type"] == error_type
         for item in error.errors()
     ), error.errors()
+
 
 def test_rejects_unknown_field(tmp_path: Path) -> None:
     data = _valid_config_data(
@@ -126,6 +126,7 @@ def test_rejects_unknown_field(tmp_path: Path) -> None:
         location=("runtime", "random_sead"),
         error_type="extra_forbidden",
     )
+
 
 @pytest.mark.parametrize(
     ("seed", "error_type"),
@@ -154,6 +155,7 @@ def test_rejects_seed_outside_supported_range(
         error_type=error_type,
     )
 
+
 def test_rejects_string_for_integer_in_strict_mode(tmp_path: Path) -> None:
     config_path = _write_yaml(
         tmp_path,
@@ -168,6 +170,7 @@ def test_rejects_string_for_integer_in_strict_mode(tmp_path: Path) -> None:
         location=("runtime", "random_seed"),
         error_type="int_type",
     )
+
 
 @pytest.mark.parametrize(
     ("field_name", "invalid_value", "error_type"),
@@ -205,6 +208,7 @@ def test_rejects_non_positive_resource_limit(
         location=("runtime", field_name),
         error_type=error_type,
     )
+
 
 @pytest.mark.parametrize(
     ("target_name", "field_name", "new_value"),

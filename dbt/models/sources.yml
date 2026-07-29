@@ -2,12 +2,93 @@ version: 2
 
 sources:
   - name: fraudguard
-    description: Raw FraudGuard tables loaded from MinIO by Airflow.
+    description: >
+      Append-only physical ingestion and audit tables loaded from completed
+      MinIO batches. These relations are not direct ML training inputs.
     schema: "{{ env_var('DBT_CLICKHOUSE_DATABASE', 'fraudguard') }}"
+    meta:
+      owner: fraud-platform
+      contract_version: 1
+
     tables:
       - name: transactions
-        description: Transaction events loaded from completed MinIO batches.
+        description: >
+          Physical PaySim transaction rows. Retry duplicates are intentionally
+          retained. Business key is (source, event_id).
+        columns:
+          - name: source
+            data_tests: [not_null]
+          - name: event_id
+            data_tests: [not_null]
+          - name: event_time
+            data_tests: [not_null]
+          - name: minio_batch_id
+            data_tests: [not_null]
+
       - name: transaction_labels
-        description: Fraud labels loaded independently from transaction events.
+        description: >
+          Physical final PaySim label rows. No observed_at, delayed-label,
+          correction or label-maturity semantics.
+        columns:
+          - name: source
+            data_tests: [not_null]
+          - name: event_id
+            data_tests: [not_null]
+          - name: is_fraud
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [0, 1]
+          - name: is_flagged_fraud
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [0, 1]
+          - name: minio_batch_id
+            data_tests: [not_null]
+
       - name: ingestion_batches
-        description: Airflow ingestion manifest and batch status history.
+        description: >
+          Append-only Airflow attempt ledger. A batch is committed once any
+          attempt has status success.
+        columns:
+          - name: pipeline
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["transactions", "labels"]
+          - name: batch_id
+            data_tests: [not_null]
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["success", "failed"]
+
+      - name: ingestion_batch_quality
+        description: >
+          Physical quality manifests with the invariant
+          input_rows = valid_rows + quarantine_rows.
+        columns:
+          - name: pipeline
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["transactions", "labels"]
+          - name: batch_id
+            data_tests: [not_null]
+          - name: source
+            data_tests: [not_null]
+          - name: input_rows
+            data_tests: [not_null]
+          - name: valid_rows
+            data_tests: [not_null]
+          - name: quarantine_rows
+            data_tests: [not_null]
+          - name: duplicate_rows
+            data_tests: [not_null]

@@ -17,7 +17,18 @@ TO fraudguard_loader_role;
 GRANT SELECT, INSERT ON fraudguard.ingestion_batches
 TO fraudguard_loader_role;
 
+GRANT SELECT, INSERT ON fraudguard.ingestion_batch_quality
+TO fraudguard_loader_role;
+
+
 GRANT SELECT ON system.tables
+TO fraudguard_loader_role;
+
+-- Airflow đọc Parquet từ MinIO thông qua ClickHouse s3().
+GRANT READ ON S3
+TO fraudguard_loader_role;
+
+GRANT CREATE TEMPORARY TABLE ON *.*
 TO fraudguard_loader_role;
 
 -- dbt đọc dữ liệu thô và quản lý các lớp dữ liệu phân tích.

@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: int_committed_ingestion_batches
+    description: One monotonic commit marker per (pipeline, batch_id).
+    columns:
+      - name: pipeline
+        data_tests: [not_null]
+      - name: batch_id
+        data_tests: [not_null]
+      - name: committed_at
+        data_tests: [not_null]
+      - name: success_attempt_count
+        data_tests: [not_null]
+
+  - name: int_transactions_ranked
+    description: Physical committed transaction rows with canonical rank.
+
+  - name: int_transaction_labels_ranked
+    description: Physical committed label rows with canonical rank.
+
+  - name: int_ingestion_quality_ranked
+    description: Physical committed quality rows with deterministic rank.
+
+  - name: int_ingestion_quality_latest
+    description: Canonical quality manifest row for reconciliation.

@@ -12,10 +12,6 @@ def label_validation_reason(record: Column) -> Column:
             lit("AVRO_DECODE_FAILED"),
         )
         .when(
-            record["observed_at"].isNull(),
-            lit("MISSING_OBSERVED_AT"),
-        )
-        .when(
             ~record["isFraud"].isin(0, 1),
             lit("INVALID_IS_FRAUD"),
         )
@@ -34,6 +30,7 @@ def main() -> None:
     )
     run_landing(
         LandingConfig(
+            pipeline="labels",
             app_name="KafkaLabelsToMinio",
             kafka_topic=kafka_topic,
             kafka_bootstrap_servers=os.getenv(
@@ -56,13 +53,17 @@ def main() -> None:
                 "LABEL_QUARANTINE_PATH",
                 "s3a://fraud-transaction-labels-quarantine",
             ),
+            quality_path=os.getenv(
+                "LABEL_QUALITY_PATH",
+                "s3a://fraud-ingestion-quality/pipeline=labels",
+            ),
             checkpoint_path=os.getenv(
                 "LABEL_CHECKPOINT_PATH",
                 "s3a://fraud-transaction-labels-checkpoint/checkpoint",
             ),
             record_column="label",
-            partition_timestamp_column="observed_at",
-            partition_column="observed_date",
+            partition_timestamp_column=None,
+            partition_column=None,
             validation_reason_builder=label_validation_reason,
         )
     )

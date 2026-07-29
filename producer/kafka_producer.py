@@ -258,7 +258,6 @@ def convert_paysim_row(
     label = {
         "event_id": event_id,
         "source": "paysim",
-        "observed_at": ingested_at,
         "isFraud": int(row["isFraud"]),
         "isFlaggedFraud": int(row["isFlaggedFraud"]),
     }

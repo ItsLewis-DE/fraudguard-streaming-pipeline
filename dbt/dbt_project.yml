@@ -17,6 +17,9 @@ clean-targets:
   - dbt_packages
   - logs
 
+vars:
+  use_fixtures: false
+
 models:
   fraudguard:
     staging:
@@ -30,11 +33,25 @@ models:
       +tags: ["intermediate"]
 
     marts:
-      +schema: mart
-      +materialized: table
-      +tags: ["superset", "analytics"]
+      core:
+        +schema: core
+        +materialized: table
+        +tags: ["core"]
+      ml:
+        +schema: ml
+        +materialized: table
+        +tags: ["ml", "training"]
+      analytics:
+        +schema: analytics
+        +materialized: table
+        +tags: ["analytics", "superset"]
 
     monitoring:
       +schema: monitoring
       +materialized: table
-      +tags: ["superset", "monitoring"]
+      +tags: ["monitoring"]
+
+seeds:
+  fraudguard:
+    +schema: staging
+    +quote_columns: false

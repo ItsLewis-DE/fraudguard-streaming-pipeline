@@ -15,6 +15,7 @@ CHECKPOINT_PATH="s3a://fraud-transactions-checkpoint"
 LABEL_VALID_PATH="s3a://fraud-transaction-labels"
 LABEL_QUARANTINE_PATH="s3a://fraud-transaction-labels-quarantine"
 LABEL_CHECKPOINT_PATH="s3a://fraud-transaction-labels-checkpoint"
+QUALITY_PATH="s3a://fraud-ingestion-quality"
 
 mc alias set \
     "$MINIO_ALIAS" \
@@ -38,7 +39,8 @@ for s3a_path in \
     "$CHECKPOINT_PATH" \
     "$LABEL_VALID_PATH" \
     "$LABEL_QUARANTINE_PATH" \
-    "$LABEL_CHECKPOINT_PATH"
+    "$LABEL_CHECKPOINT_PATH" \
+    "$QUALITY_PATH"
 do
     bucket_name="${s3a_path#s3a://}"
     mc mb --ignore-existing "$MINIO_ALIAS/$bucket_name"

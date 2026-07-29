@@ -35,6 +35,7 @@ def main() -> None:
     kafka_topic = os.getenv("KAFKA_TOPIC", "fraud.transaction")
     run_landing(
         LandingConfig(
+            pipeline="transactions",
             app_name="KafkaTransactionsToMinio",
             kafka_topic=kafka_topic,
             kafka_bootstrap_servers=os.getenv(
@@ -56,6 +57,10 @@ def main() -> None:
             quarantine_path=os.getenv(
                 "QUARANTINE_PATH",
                 "s3a://fraud-transactions-quarantine",
+            ),
+            quality_path=os.getenv(
+                "QUALITY_PATH",
+                "s3a://fraud-ingestion-quality/pipeline=transactions",
             ),
             checkpoint_path=os.getenv(
                 "CHECKPOINT_PATH",

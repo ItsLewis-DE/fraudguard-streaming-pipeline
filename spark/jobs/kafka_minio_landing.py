@@ -19,12 +19,15 @@ from pyspark.sql.functions import (
     length,
     lit,
     to_date,
+    trim,
     when,
 )
+from pyspark.sql.functions import sum as spark_sum
 
 logger = logging.getLogger("kafka-minio-landing")
 
 ValidationReasonBuilder = Callable[[Column], Column]
+UNKNOWN_SOURCE = "unknown"
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class SchemaCatalog:
 
 @dataclass(frozen=True)
 class LandingConfig:
+    pipeline: str
     kafka_topic: str
     kafka_bootstrap_servers: str
     schema_registry_url: str
@@ -44,14 +48,22 @@ class LandingConfig:
     app_name: str
     valid_path: str
     quarantine_path: str
+    quality_path: str
     checkpoint_path: str
     record_column: str
-    partition_timestamp_column: str
-    partition_column: str
+    partition_timestamp_column: str | None
+    partition_column: str | None
     validation_reason_builder: ValidationReasonBuilder
     trigger_interval: str = "10 seconds"
     starting_offset: str = "earliest"
     max_offsets_per_trigger: int = 100
+
+    def __post_init__(self) -> None:
+        if (self.partition_timestamp_column is None) != (self.partition_column is None):
+            raise ValueError(
+                "partition_timestamp_column and partition_column must both "
+                "be configured or both be None"
+            )
 
 
 def registry_get(registry_url: str, path: str) -> dict | list:
@@ -244,6 +256,77 @@ def prepare_quarantine(df: DataFrame) -> DataFrame:
     )
 
 
+def build_quality_manifest(
+    batch_df: DataFrame,
+    decoded_df: DataFrame,
+    config: LandingConfig,
+    batch_id: int,
+) -> DataFrame:
+    """Build one reconciliation row per available business date and source.
+
+    Header-level failures cannot expose business event time or source, so they
+    remain in the explicit unknown bucket instead of being assigned processing
+    time. Pipelines without a source business timestamp use a null event date.
+    Business-key duplicates are not counted in the landing layer.
+    """
+
+    header_quality_df = batch_df.filter(col("quarantine_reason").isNotNull()).select(
+        lit(None).cast("date").alias("event_date"),
+        lit(UNKNOWN_SOURCE).alias("source"),
+        lit(1).cast("long").alias("input_rows"),
+        lit(0).cast("long").alias("valid_rows"),
+        lit(1).cast("long").alias("quarantine_rows"),
+    )
+
+    source_column = col(f"{config.record_column}.source").cast("string")
+    if config.partition_timestamp_column is None:
+        event_date_column = lit(None).cast("date")
+    else:
+        event_date_column = to_date(
+            col(f"{config.record_column}.{config.partition_timestamp_column}")
+        )
+
+    decoded_quality_df = decoded_df.select(
+        event_date_column.alias("event_date"),
+        when(
+            source_column.isNull() | (trim(source_column) == ""),
+            lit(UNKNOWN_SOURCE),
+        )
+        .otherwise(source_column)
+        .alias("source"),
+        lit(1).cast("long").alias("input_rows"),
+        when(col("quarantine_reason").isNull(), lit(1))
+        .otherwise(lit(0))
+        .cast("long")
+        .alias("valid_rows"),
+        when(col("quarantine_reason").isNotNull(), lit(1))
+        .otherwise(lit(0))
+        .cast("long")
+        .alias("quarantine_rows"),
+    )
+
+    return (
+        header_quality_df.unionByName(decoded_quality_df)
+        .groupBy("event_date", "source")
+        .agg(
+            spark_sum("input_rows").cast("long").alias("input_rows"),
+            spark_sum("valid_rows").cast("long").alias("valid_rows"),
+            spark_sum("quarantine_rows").cast("long").alias("quarantine_rows"),
+        )
+        .withColumn("duplicate_rows", lit(0).cast("long"))
+        .select(
+            lit(config.pipeline).alias("pipeline"),
+            lit(batch_id).cast("long").alias("batch_id"),
+            "event_date",
+            "source",
+            "input_rows",
+            "valid_rows",
+            "quarantine_rows",
+            "duplicate_rows",
+        )
+    )
+
+
 def build_process_batch(
     config: LandingConfig,
     catalog: SchemaCatalog,
@@ -283,43 +366,56 @@ def build_process_batch(
                 allowMissingColumns=True,
             )
 
-            valid_df = (
-                decoded_df.filter(col("quarantine_reason").isNull())
-                .select(
-                    f"{config.record_column}.*",
-                    "message_schema_id",
-                    col("topic").alias("kafka_topic"),
-                    col("partition").alias("kafka_partition"),
-                    col("offset").alias("kafka_offset"),
-                    col("timestamp").alias("kafka_timestamp"),
-                )
-                .withColumn(
+            valid_df = decoded_df.filter(col("quarantine_reason").isNull()).select(
+                f"{config.record_column}.*",
+                "message_schema_id",
+                col("topic").alias("kafka_topic"),
+                col("partition").alias("kafka_partition"),
+                col("offset").alias("kafka_offset"),
+                col("timestamp").alias("kafka_timestamp"),
+            )
+            if (
+                config.partition_column is not None
+                and config.partition_timestamp_column is not None
+            ):
+                valid_df = valid_df.withColumn(
                     config.partition_column,
                     to_date(col(config.partition_timestamp_column)),
                 )
+            quality_df = build_quality_manifest(
+                batch_df,
+                decoded_df,
+                config,
+                batch_id,
             )
 
             batch_partition = f"{batch_id:020d}"
 
-            if not valid_df.isEmpty():
-                (
-                    valid_df.write.mode("overwrite")
-                    .partitionBy(config.partition_column)
-                    .parquet(f"{config.valid_path}/batch_id={batch_partition}")
-                )
+            valid_writer = valid_df.write.mode("overwrite")
+            if config.partition_column is not None:
+                valid_writer = valid_writer.partitionBy(config.partition_column)
+            valid_writer.parquet(f"{config.valid_path}/batch_id={batch_partition}")
 
-            if not quarantine_df.isEmpty():
-                (
-                    quarantine_df.write.mode("overwrite")
-                    .partitionBy(
-                        "quarantine_reason",
-                        "kafka_date",
-                    )
-                    .parquet(f"{config.quarantine_path}/batch_id={batch_partition}")
+            (
+                quarantine_df.write.mode("overwrite")
+                .partitionBy(
+                    "quarantine_reason",
+                    "kafka_date",
                 )
+                .parquet(f"{config.quarantine_path}/batch_id={batch_partition}")
+            )
+
+            # Write the manifest last. Its _SUCCESS marker is the batch-level
+            # completion signal consumed by Airflow.
+            (
+                quality_df.coalesce(1)
+                .write.mode("overwrite")
+                .parquet(f"{config.quality_path}/batch_id={batch_partition}")
+            )
 
             logger.info(
-                "Completed batch_id=%s reader_schema_id=%s",
+                "Completed pipeline=%s batch_id=%s reader_schema_id=%s",
+                config.pipeline,
                 batch_id,
                 catalog.reader_schema_id,
             )
@@ -365,10 +461,13 @@ def run_landing(config: LandingConfig) -> None:
     )
 
     logger.info(
-        "Starting topic=%s valid_path=%s quarantine_path=%s checkpoint_path=%s",
+        "Starting pipeline=%s topic=%s valid_path=%s quarantine_path=%s "
+        "quality_path=%s checkpoint_path=%s",
+        config.pipeline,
         config.kafka_topic,
         config.valid_path,
         config.quarantine_path,
+        config.quality_path,
         config.checkpoint_path,
     )
 

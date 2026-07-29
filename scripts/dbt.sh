@@ -11,7 +11,6 @@ if [[ -f "${PROJECT_ROOT}/.env.dbt" ]]; then
     set +a
 fi
 
-exec uv run dbt \
+exec uv run dbt "$@"\
     --project-dir "${PROJECT_ROOT}/dbt" \
-    --profiles-dir "${PROJECT_ROOT}/dbt" \
-    "$@"
+    --profiles-dir "${PROJECT_ROOT}/dbt"

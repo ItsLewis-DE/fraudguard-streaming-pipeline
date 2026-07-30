@@ -105,7 +105,7 @@ QUALITY_INSERT_SQL = """
 INSERT INTO ingestion_batch_quality
 (
     pipeline, batch_id, event_date, source,
-    input_rows, valid_rows, quarantine_rows, duplicate_rows, loaded_at
+    input_rows, valid_rows, quarantine_rows, loaded_at
 )
 SELECT
     pipeline,
@@ -115,7 +115,6 @@ SELECT
     toUInt64(input_rows),
     toUInt64(valid_rows),
     toUInt64(quarantine_rows),
-    toUInt64(duplicate_rows),
     now64(3)
 FROM s3(
     {quality_source_url:String},

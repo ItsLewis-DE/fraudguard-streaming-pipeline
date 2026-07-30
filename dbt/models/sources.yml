@@ -90,5 +90,3 @@ sources:
             data_tests: [not_null]
           - name: quarantine_rows
             data_tests: [not_null]
-          - name: duplicate_rows
-            data_tests: [not_null]

@@ -1,0 +1,172 @@
+version: 2
+
+models:
+  - name: ml_training_candidates
+    description: >
+      Offline PaySim candidate population at the intended grain of one row per
+      canonical (source, event_id) transaction. Every row receives an explicit
+      training eligibility decision and a single exclusion reason. Final labels
+      are present only for offline training-readiness evaluation and are not
+      inference inputs. Because PaySim is synthetic, this model cannot establish
+      production performance on real banking data.
+    columns:
+      - name: source
+        description: Synthetic-data source namespace; a structural key and not an approved feature.
+        data_tests: [not_null]
+      - name: event_id
+        description: Transaction identifier within source; a structural key and not an approved feature.
+        data_tests: [not_null]
+      - name: event_time
+        description: Transaction business time used for temporal structure, not an approved feature.
+        data_tests: [not_null]
+      - name: event_date
+        description: Calendar date derived from event_time.
+        data_tests: [not_null]
+      - name: step
+        description: One-based PaySim simulation-hour step.
+        data_tests: [not_null]
+      - name: transaction_type
+        description: PaySim transaction category.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+      - name: amount
+        description: Transaction amount supplied by PaySim.
+        data_tests: [not_null]
+      - name: origin_balance_before
+        description: Origin balance immediately before the transaction.
+      - name: origin_balance_after
+        description: Origin balance after the ledger update; pending M2 leakage audit before feature use.
+      - name: destination_balance_before
+        description: Destination balance immediately before the transaction.
+      - name: destination_balance_after
+        description: Destination balance after the ledger update; pending M2 leakage audit before feature use.
+      - name: origin_balance_delta
+        description: Origin before-minus-after balance delta; audit candidate pending M2 leakage review.
+      - name: destination_balance_delta
+        description: Destination after-minus-before balance delta; audit candidate pending M2 leakage review.
+      - name: origin_amount_residual
+        description: Absolute difference between the origin balance delta and amount; pending M2 leakage review.
+      - name: destination_amount_residual
+        description: Absolute difference between the destination balance delta and amount; pending M2 leakage review.
+      - name: is_fraud
+        description: Final synthetic target for offline use; unmatched-label rows may carry join defaults.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: has_final_label
+        description: True when a matching canonical final label exists.
+        data_tests: [not_null]
+      - name: has_payload_conflict
+        description: True when the canonical transaction key has conflicting payload versions.
+        data_tests: [not_null]
+      - name: has_label_payload_conflict
+        description: True when the matched label key has conflicting payload versions.
+        data_tests: [not_null]
+      - name: has_invalid_amount
+        description: True when the canonical amount is negative.
+        data_tests: [not_null]
+      - name: has_invalid_balance
+        description: True when any canonical before/after balance is negative.
+        data_tests: [not_null]
+      - name: is_training_eligible
+        description: True only when the row has a final label and no configured conflict or validity exclusion.
+        data_tests: [not_null]
+      - name: training_exclusion_reason
+        description: First applicable deterministic exclusion reason, or eligible.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - eligible
+                  - missing_final_label
+                  - transaction_payload_conflict
+                  - label_payload_conflict
+                  - invalid_amount
+                  - invalid_balance
+
+  - name: ml_training_transactions
+    description: >
+      Eligible offline PaySim training relation at the intended grain of one row
+      per (source, event_id), evaluated at the post_ledger_update prediction
+      point. IDs, time fields, and the target are structural non-features.
+      After-balance, delta, and residual columns remain audit candidates pending
+      M2 leakage analysis; this model does not define a final feature allowlist
+      or support claims about production banking performance.
+    columns:
+      - name: source
+        description: Synthetic-data source namespace; structural key, not a feature.
+        data_tests: [not_null]
+      - name: event_id
+        description: Transaction identifier within source; structural key, not a feature.
+        data_tests: [not_null]
+      - name: event_time
+        description: Transaction business time for temporal splitting and audit, not a feature.
+        data_tests: [not_null]
+      - name: event_date
+        description: Calendar date derived from event_time for temporal structure, not a feature.
+        data_tests: [not_null]
+      - name: step
+        description: One-based PaySim simulation-hour step.
+        data_tests: [not_null]
+      - name: transaction_type
+        description: PaySim transaction category.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+      - name: amount
+        description: Transaction amount supplied by PaySim.
+        data_tests: [not_null]
+      - name: origin_balance_before
+        description: Origin balance immediately before the transaction.
+      - name: origin_balance_after
+        description: Post-ledger origin balance; pending M2 leakage audit before feature use.
+      - name: destination_balance_before
+        description: Destination balance immediately before the transaction.
+      - name: destination_balance_after
+        description: Post-ledger destination balance; pending M2 leakage audit before feature use.
+      - name: origin_balance_delta
+        description: Origin before-minus-after balance delta; pending M2 leakage audit.
+      - name: destination_balance_delta
+        description: Destination after-minus-before balance delta; pending M2 leakage audit.
+      - name: origin_amount_residual
+        description: Origin balance-delta residual against amount; pending M2 leakage audit.
+      - name: destination_amount_residual
+        description: Destination balance-delta residual against amount; pending M2 leakage audit.
+      - name: is_fraud
+        description: Final synthetic PaySim target for supervised training; never an inference feature.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
+  - name: ml_training_exclusion_summary
+    description: >
+      Offline audit summary of the PaySim candidate partition at one row per
+      observed training_exclusion_reason. row_count supports reconciliation of
+      eligible and excluded candidates; absence of a reason means no row for
+      that reason rather than an implicit zero-filled record.
+    columns:
+      - name: training_exclusion_reason
+        description: Candidate eligibility category represented by this summary row.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - eligible
+                  - missing_final_label
+                  - transaction_payload_conflict
+                  - label_payload_conflict
+                  - invalid_amount
+                  - invalid_balance
+      - name: row_count
+        description: Number of candidate rows assigned to the exclusion reason.
+        data_tests: [not_null]

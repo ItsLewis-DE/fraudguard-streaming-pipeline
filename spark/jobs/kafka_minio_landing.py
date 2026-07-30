@@ -313,7 +313,6 @@ def build_quality_manifest(
             spark_sum("valid_rows").cast("long").alias("valid_rows"),
             spark_sum("quarantine_rows").cast("long").alias("quarantine_rows"),
         )
-        .withColumn("duplicate_rows", lit(0).cast("long"))
         .select(
             lit(config.pipeline).alias("pipeline"),
             lit(batch_id).cast("long").alias("batch_id"),
@@ -322,7 +321,6 @@ def build_quality_manifest(
             "input_rows",
             "valid_rows",
             "quarantine_rows",
-            "duplicate_rows",
         )
     )
 

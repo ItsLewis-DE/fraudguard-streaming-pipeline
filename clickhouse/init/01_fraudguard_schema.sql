@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS fraudguard.ingestion_batch_quality
     input_rows        UInt64,
     valid_rows        UInt64,
     quarantine_rows   UInt64,
-    duplicate_rows    UInt64 DEFAULT 0,
     loaded_at         DateTime64(3, 'UTC') DEFAULT now64(3)
 )
 ENGINE = MergeTree

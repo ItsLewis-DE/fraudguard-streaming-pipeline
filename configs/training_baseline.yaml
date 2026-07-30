@@ -1,0 +1,38 @@
+schema_version: 1
+experiment_name: fraudguard_logistic_baseline
+
+dataset:
+  relation: fraudguard_ml.ml_training_transactions
+  prediction_point: post_transaction_event
+  id_columns:
+    - source
+    - event_id
+  split_columns:
+    - event_time
+    - event_date
+    - step
+  feature_columns:
+    - transaction_type
+    - amount
+    - origin_balance_before
+    - destination_balance_before
+  target_column: is_fraud
+  forbidden_feature_columns:
+    - source
+    - event_id
+    - event_time
+    - event_date
+    - step
+    - origin_account
+    - destination_account
+    - is_fraud
+    - is_flagged_fraud
+
+split:
+  strategy: temporal
+  train_end: "2026-01-21T20:00:00Z"
+  validation_end: "2026-01-26T20:00:00Z"
+  test_end: "2026-01-31T23:00:00Z"
+
+runtime:
+  random_seed: 42

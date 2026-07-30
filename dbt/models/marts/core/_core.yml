@@ -1,0 +1,196 @@
+version: 2
+
+models:
+  - name: fct_transactions
+    description: >
+      Canonical committed PaySim transaction relation at the intended grain of
+      one row per (source, event_id). Replay and payload-conflict lineage is
+      retained for auditability. Balance-after fields describe the
+      post-ledger-update state; this core relation is an offline data-readiness
+      asset, not an inference feature contract or a final feature allowlist.
+      PaySim is synthetic, so results derived from this relation do not establish
+      performance on real banking data.
+    columns:
+      - name: source
+        description: Synthetic-data source namespace used with event_id as the business key.
+        data_tests: [not_null]
+      - name: event_id
+        description: Transaction event identifier within source.
+        data_tests: [not_null]
+      - name: event_time
+        description: Deterministic transaction business time derived from the PaySim step.
+        data_tests: [not_null]
+      - name: event_date
+        description: Calendar date derived from event_time.
+        data_tests: [not_null]
+      - name: canonical_ingested_at
+        description: Ingestion timestamp carried by the canonical physical row.
+      - name: step
+        description: One-based PaySim simulation-hour step.
+        data_tests: [not_null]
+      - name: transaction_type
+        description: PaySim transaction category.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+      - name: amount
+        description: Transaction amount supplied by PaySim.
+        data_tests: [not_null]
+      - name: origin_account
+        description: Synthetic origin account identifier; an audit field, not an approved ML feature.
+      - name: origin_balance_before
+        description: Origin balance immediately before the transaction.
+      - name: origin_balance_after
+        description: Origin balance after the ledger update; subject to later leakage review before ML use.
+      - name: destination_account
+        description: Synthetic destination account identifier; an audit field, not an approved ML feature.
+      - name: destination_balance_before
+        description: Destination balance immediately before the transaction.
+      - name: destination_balance_after
+        description: Destination balance after the ledger update; subject to later leakage review before ML use.
+      - name: schema_id
+        description: Event schema identifier retained for lineage.
+      - name: canonical_kafka_topic
+        description: Kafka topic of the physical row selected as canonical.
+      - name: canonical_kafka_partition
+        description: Kafka partition of the physical row selected as canonical.
+      - name: canonical_kafka_offset
+        description: Kafka offset of the physical row selected as canonical.
+      - name: canonical_minio_batch_id
+        description: MinIO landing batch containing the canonical physical row.
+      - name: canonical_minio_object
+        description: MinIO object containing the canonical physical row.
+      - name: canonical_loaded_at
+        description: ClickHouse load timestamp of the canonical physical row.
+      - name: transaction_payload_hash
+        description: Hash used to distinguish payload versions for the business key.
+      - name: physical_row_count
+        description: Number of committed physical rows observed for the business key.
+        data_tests: [not_null]
+      - name: replay_row_count
+        description: Physical rows beyond the selected canonical row.
+        data_tests: [not_null]
+      - name: payload_version_count
+        description: Number of distinct committed transaction payload versions.
+        data_tests: [not_null]
+      - name: has_payload_conflict
+        description: True when more than one transaction payload version exists for the business key.
+        data_tests: [not_null]
+      - name: has_invalid_amount
+        description: True when the canonical transaction amount is negative.
+        data_tests: [not_null]
+      - name: has_invalid_balance
+        description: True when any canonical before/after balance is negative.
+        data_tests: [not_null]
+
+  - name: fct_transaction_labels
+    description: >
+      Canonical final PaySim label relation at the intended grain of one row per
+      (source, event_id). It contains the synthetic final fraud label and the
+      PaySim rule flag for offline analysis only. The source does not provide
+      observed_at, available_at, or label-maturity history, so this relation must
+      not be treated as a point-in-time inference input.
+    columns:
+      - name: source
+        description: Synthetic-data source namespace used with event_id as the business key.
+        data_tests: [not_null]
+      - name: event_id
+        description: Transaction event identifier within source.
+        data_tests: [not_null]
+      - name: is_fraud
+        description: Final synthetic PaySim fraud target; offline label data, never an inference feature.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_flagged_fraud
+        description: PaySim rule-produced fraud flag; offline rule/label data, not an inference feature.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: schema_id
+        description: Label-event schema identifier retained for lineage.
+      - name: canonical_kafka_topic
+        description: Kafka topic of the label row selected as canonical.
+      - name: canonical_kafka_partition
+        description: Kafka partition of the label row selected as canonical.
+      - name: canonical_kafka_offset
+        description: Kafka offset of the label row selected as canonical.
+      - name: canonical_minio_batch_id
+        description: MinIO landing batch containing the canonical label row.
+      - name: canonical_minio_object
+        description: MinIO object containing the canonical label row.
+      - name: canonical_loaded_at
+        description: ClickHouse load timestamp of the canonical label row.
+      - name: label_payload_hash
+        description: Hash used to distinguish label payload versions for the business key.
+      - name: physical_row_count
+        description: Number of committed physical label rows observed for the business key.
+        data_tests: [not_null]
+      - name: replay_row_count
+        description: Physical label rows beyond the selected canonical row.
+        data_tests: [not_null]
+      - name: payload_version_count
+        description: Number of distinct committed label payload versions.
+        data_tests: [not_null]
+      - name: has_payload_conflict
+        description: True when more than one label payload version exists for the business key.
+        data_tests: [not_null]
+
+  - name: fct_transactions_labeled
+    description: >
+      Offline training-readiness relation produced by left joining canonical
+      labels to canonical transactions. Its intended grain is one row per
+      canonical (source, event_id) transaction, including transactions without a
+      matching final label. Labels and readiness flags in this model are not an
+      inference contract.
+    columns:
+      - name: source
+        description: Synthetic-data source namespace used with event_id as the business key.
+        data_tests: [not_null]
+      - name: event_id
+        description: Canonical transaction event identifier within source.
+        data_tests: [not_null]
+      - name: event_time
+        description: Deterministic transaction business time derived from the PaySim step.
+        data_tests: [not_null]
+      - name: event_date
+        description: Calendar date derived from event_time.
+        data_tests: [not_null]
+      - name: step
+        description: One-based PaySim simulation-hour step.
+        data_tests: [not_null]
+      - name: transaction_type
+        description: PaySim transaction category.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+      - name: amount
+        description: Transaction amount supplied by PaySim.
+        data_tests: [not_null]
+      - name: has_payload_conflict
+        description: Transaction payload-conflict flag inherited from the canonical transaction.
+        data_tests: [not_null]
+      - name: has_invalid_amount
+        description: Transaction amount-quality flag inherited from the canonical transaction.
+        data_tests: [not_null]
+      - name: has_invalid_balance
+        description: Transaction balance-quality flag inherited from the canonical transaction.
+        data_tests: [not_null]
+      - name: is_fraud
+        description: Final synthetic target when a canonical label matches; offline label data only.
+      - name: is_flagged_fraud
+        description: PaySim rule flag when a canonical label matches; offline rule/label data only.
+      - name: has_final_label
+        description: True when the canonical transaction has a matching canonical final label.
+        data_tests: [not_null]
+      - name: has_label_payload_conflict
+        description: True when the matched label business key has conflicting payload versions.
+        data_tests: [not_null]

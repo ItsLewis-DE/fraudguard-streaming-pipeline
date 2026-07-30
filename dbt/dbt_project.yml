@@ -53,5 +53,5 @@ models:
 
 seeds:
   fraudguard:
-    +schema: staging
+    +schema: seeds
     +quote_columns: false

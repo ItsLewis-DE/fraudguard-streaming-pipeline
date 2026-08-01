@@ -2,6 +2,7 @@
 .env
 .env.airflow
 .env.dbt
+.env.ml
 __pycache__/
 *.py[cod]
 
@@ -26,3 +27,4 @@ htmlcov/
 *.egg-info/
 
 AGENTS.md
+docs

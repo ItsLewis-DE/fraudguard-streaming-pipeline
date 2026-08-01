@@ -196,6 +196,7 @@ services:
       CLICKHOUSE_LOADER_PASSWORD: ${CLICKHOUSE_LOADER_PASSWORD:?CLICKHOUSE_LOADER_PASSWORD must be set}
       CLICKHOUSE_TRANSFORMER_PASSWORD: ${DBT_CLICKHOUSE_PASSWORD:?DBT_CLICKHOUSE_PASSWORD must be set}
       CLICKHOUSE_SUPERSET_PASSWORD: ${CLICKHOUSE_SUPERSET_PASSWORD:?CLICKHOUSE_SUPERSET_PASSWORD must be set}
+      CLICKHOUSE_ML_PASSWORD: ${CLICKHOUSE_ML_PASSWORD:?CLICKHOUSE_ML_PASSWORD must be set}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init/01_fraudguard_schema.sql:/docker-entrypoint-initdb.d/01_fraudguard_schema.sql:ro

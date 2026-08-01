@@ -1,7 +1,6 @@
 schema_version: 1
 dataset_name: paysim_training_transactions_v1
-relation: fraudguard.ml_training_transactions
-lineage_relation: fraudguard.fct_transactions
+relation: fraudguard_ml.ml_training_transactions
 source_column: source
 expected_source: paysim
 prediction_point: post_ledger_update

@@ -41,15 +41,6 @@ models:
         +schema: ml
         +materialized: table
         +tags: ["ml", "training"]
-      analytics:
-        +schema: analytics
-        +materialized: table
-        +tags: ["analytics", "superset"]
-
-    monitoring:
-      +schema: monitoring
-      +materialized: table
-      +tags: ["monitoring"]
 
 seeds:
   fraudguard:

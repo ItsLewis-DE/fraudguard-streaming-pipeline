@@ -1,3 +1,4 @@
+-- Kiểm tra có sự bất hợp lí nào k trong table đó
 select *
 from {{ ref('ml_training_candidates') }}
 where

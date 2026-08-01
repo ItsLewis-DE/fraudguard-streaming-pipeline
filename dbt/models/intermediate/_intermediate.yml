@@ -17,10 +17,4 @@ models:
     description: Physical committed transaction rows with canonical rank.
 
   - name: int_transaction_labels_ranked
-    description: Physical committed label rows with canonical rank.
-
-  - name: int_ingestion_quality_ranked
-    description: Physical committed quality rows with deterministic rank.
-
-  - name: int_ingestion_quality_latest
-    description: Canonical quality manifest row for reconciliation.
+    description: Physical committed label rows with deterministic rank.

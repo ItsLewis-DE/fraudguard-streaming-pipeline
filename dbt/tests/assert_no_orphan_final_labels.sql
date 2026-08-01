@@ -1,3 +1,4 @@
+--Kiểm tra việc có trong label nhưng lại k có transaction
 select
     l.source,
     l.event_id

@@ -1,0 +1,59 @@
+schema_version: 1
+dataset_name: paysim_training_transactions_v1
+relation: fraudguard.ml_training_transactions
+lineage_relation: fraudguard.fct_transactions
+source_column: source
+expected_source: paysim
+prediction_point: post_ledger_update
+primary_key: [source, event_id]
+event_time_column: event_time
+step_column: step
+target_column: is_fraud
+transaction_type_column: transaction_type
+replay_epoch_utc: "2026-01-01T00:00:00Z"
+
+transaction_type_domain:
+  - CASH_IN
+  - CASH_OUT
+  - DEBIT
+  - PAYMENT
+  - TRANSFER
+
+expected_columns:
+  - {name: source, clickhouse_type: String}
+  - {name: event_id, clickhouse_type: String}
+  - {name: event_time, clickhouse_type: "DateTime64(3, 'UTC')"}
+  - {name: event_date, clickhouse_type: Date}
+  - {name: step, clickhouse_type: UInt16}
+  - {name: transaction_type, clickhouse_type: String}
+  - {name: amount, clickhouse_type: "Decimal(18, 2)"}
+  - {name: origin_balance_before, clickhouse_type: "Decimal(18, 2)"}
+  - {name: origin_balance_after, clickhouse_type: "Decimal(18, 2)"}
+  - {name: destination_balance_before, clickhouse_type: "Decimal(18, 2)"}
+  - {name: destination_balance_after, clickhouse_type: "Decimal(18, 2)"}
+  - {name: origin_balance_delta, clickhouse_type: "Decimal(18, 2)"}
+  - {name: destination_balance_delta, clickhouse_type: "Decimal(18, 2)"}
+  - {name: origin_amount_residual, clickhouse_type: "Decimal(18, 2)"}
+  - {name: destination_amount_residual, clickhouse_type: "Decimal(18, 2)"}
+  - {name: is_fraud, clickhouse_type: UInt8}
+
+prohibited_relation_columns:
+  - is_flagged_fraud
+  - origin_account
+  - destination_account
+
+non_feature_columns:
+  - source
+  - event_id
+  - event_time
+  - event_date
+  - step
+  - is_fraud
+
+audit_candidate_columns:
+  - origin_balance_after
+  - destination_balance_after
+  - origin_balance_delta
+  - destination_balance_delta
+  - origin_amount_residual
+  - destination_amount_residual

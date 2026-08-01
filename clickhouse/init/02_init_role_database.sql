@@ -1,11 +1,12 @@
 CREATE DATABASE IF NOT EXISTS fraudguard_staging;
 CREATE DATABASE IF NOT EXISTS fraudguard_intermediate;
-CREATE DATABASE IF NOT EXISTS fraudguard_mart;
-CREATE DATABASE IF NOT EXISTS fraudguard_monitoring;
+CREATE DATABASE IF NOT EXISTS fraudguard_core;
+CREATE DATABASE IF NOT EXISTS fraudguard_ml;
 
 CREATE ROLE IF NOT EXISTS fraudguard_loader_role;
 CREATE ROLE IF NOT EXISTS fraudguard_transformer_role;
 CREATE ROLE IF NOT EXISTS fraudguard_superset_role;
+CREATE ROLE IF NOT EXISTS fraudguard_ml_reader_role;
 
 -- Airflow chỉ nạp dữ liệu thô và đọc/ghi trạng thái ingestion.
 GRANT INSERT ON fraudguard.transactions
@@ -41,14 +42,26 @@ TO fraudguard_transformer_role;
 GRANT ALL ON fraudguard_intermediate.*
 TO fraudguard_transformer_role;
 
-GRANT ALL ON fraudguard_mart.*
+GRANT ALL ON fraudguard_core.*
 TO fraudguard_transformer_role;
 
-GRANT ALL ON fraudguard_monitoring.*
+GRANT ALL ON fraudguard_ml.*
 TO fraudguard_transformer_role;
 
 GRANT CREATE TEMPORARY TABLE ON *.*
 TO fraudguard_transformer_role;
+
+-- phục vụ machine learning
+
+GRANT SELECT ON fraudguard_ml.* TO fraudguard_ml_reader_role;
+ALTER ROLE fraudguard_ml_reader_role
+SETTINGS
+    readonly = 1,
+    max_execution_time = 120,
+    max_threads = 4,
+    max_memory_usage = 4000000000,
+    max_rows_to_read = 10000000,
+    max_bytes_to_read = 8000000000;
 
 -- Superset chỉ được đọc các bảng phục vụ báo cáo và monitoring.
 GRANT SELECT ON fraudguard_mart.*

@@ -17,6 +17,7 @@ from fraudguard_ml.config import SmokeConfig, load_yaml_config
 from fraudguard_ml.reproducibility import configure_thread_limits, seed_everything
 from fraudguard_ml.runtime import collect_runtime_metadata
 from fraudguard_ml.training_data_contract import (
+    DataContractError,
     TrainingDataContractConfig,
     validate_training_data_contract,
 )
@@ -93,6 +94,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             parser.error(f"Unknown command: {args.command}")
     except (OSError, ValueError, ValidationError) as exc:
         parser.exit(2, f"configuration error: {exc}\n")
+    except DataContractError as exc:
+        parser.exit(2, f"contract error: {exc}\n")
     except ClickHouseError:
         parser.exit(2, "ClickHouse validation request failed\n")
     raise SystemExit(exit_code)  # Để báo cho hệ điều hành chương trình có lỗi hay k

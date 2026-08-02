@@ -81,6 +81,7 @@ class TrainingDataContractConfig(FrozenStrictModel):
     schema_version: Literal[1]
     dataset_name: Literal["paysim_training_transactions_v1"]
     relation: str
+    lineage_relation: str
     source_column: Literal["source"]
     expected_source: Literal["paysim"]
     prediction_point: Literal["post_ledger_update"]
@@ -129,7 +130,7 @@ class TrainingDataContractConfig(FrozenStrictModel):
                 raise ValueError(f"invalid ClickHouse identifier: {item}")
         return value
 
-    @field_validator("relation")
+    @field_validator("relation", "lineage_relation")
     @classmethod
     def validate_relation(cls, value: str) -> str:
         if RELATION_PATTERN.fullmatch(value) is None:
@@ -212,9 +213,10 @@ class ContractMetrics:
     empty_key_count: int
     null_count: int
     invalid_source_count: int
-    invalid_target_count: int
     invalid_type_count: int
+    invalid_target_count: int
     invalid_formula_count: int
+    missing_lineage_count: int
 
 
 @dataclass(frozen=True)
@@ -266,6 +268,7 @@ METRIC_COLUMNS = (
     "invalid_type_count",
     "invalid_target_count",
     "invalid_formula_count",
+    "missing_lineage_count",
 )
 
 
@@ -276,35 +279,40 @@ def validate_training_data_contract(
     now_utc: datetime | None = None,
 ) -> ValidationReport:
     relation = RelationName.parse(config.relation)  # Kiểm tra relation có hợp lệ k
+    lineage = RelationName.parse(config.lineage_relation)
     actual_schema = read_exact_schema(client, relation)
     expected_schema = tuple(
         (column.name, column.clickhouse_type) for column in config.expected_columns
     )
     if not actual_schema:
-        raise DataContractError("training relation does not exist")
+        raise DataContractError("schema relation does not exist")
     if actual_schema != expected_schema:
         raise DataContractError(
             f"exact schema mismatch: expected={expected_schema}, actual={actual_schema}"
         )
     metrics_result = client.query(
         f"""
+        lineage as (
+            select source,event_id, toUInt8(1) as lineage_matched
+            from {lineage.quoted()}
+        )
         select 
             count() as row_count,
-            uniqExact(tuple(source,event_id)) as distinct_key_count,
-            countIf(trim(source)='' or trim(event_id) = '') as empty_key_count,
+            uniqExact(tuple(t.source, t.event_id)) as distinct_key_count,
+            countIf(trim(t.source)='' or trim(t.event_id) = '') as empty_key_count,
             countIf(
-                source is null
-                or event_id is null
-                or event_time is null
-                or event_date is null
-                or step is null
-                or transaction_type is null
-                or amount is null
-                or origin_balance_before is null
-                or origin_balance_after is null
-                or destination_balance_before is null
-                or destination_balance_after is null
-                or is_fraud is null
+                t.source is null
+                or t.event_id is null
+                or t.event_time is null
+                or t.event_date is null
+                or t.step is null
+                or t.transaction_type is null
+                or t.amount is null
+                or t.origin_balance_before is null
+                or t.origin_balance_after is null
+                or t.destination_balance_before is null
+                or t.destination_balance_after is null
+                or t.is_fraud is null
             ) as null_count, 
             countIf(t.source != {{expected_source:String}})
                     as invalid_source_count,
@@ -324,7 +332,10 @@ def validate_training_data_contract(
                 or destination_amount_residual
                     != abs(destination_balance_delta - amount)
             ) as invalid_formula_count
-        from {relation.quoted()}
+            countIf(l.lineage_matched =0) as missing_lineage_count
+        from {relation.quoted()} as t 
+        left join lineage as l
+        on l.source = t.source and l.event_id = t.event_id
         """,
         {
             "expected_source": config.expected_source,
@@ -342,6 +353,7 @@ def validate_training_data_contract(
         "invalid_type_count": metrics.invalid_type_count,
         "invalid_target_count": metrics.invalid_target_count,
         "invalid_formula_count": metrics.invalid_formula_count,
+        "missing_lineage_count": metrics.missing_lineage_count,
     }
     failed = {name: value for name, value in violations.items() if value != 0}
     if metrics.row_count == 0:

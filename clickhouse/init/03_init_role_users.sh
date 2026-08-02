@@ -4,7 +4,7 @@ set -euo pipefail
 : "${CLICKHOUSE_LOADER_PASSWORD:?CLICKHOUSE_LOADER_PASSWORD must be set}"
 : "${CLICKHOUSE_TRANSFORMER_PASSWORD:?CLICKHOUSE_TRANSFORMER_PASSWORD must be set}"
 : "${CLICKHOUSE_SUPERSET_PASSWORD:?CLICKHOUSE_SUPERSET_PASSWORD must be set}"
-: "${CLICKHOUSE_ML_READER_PASSWORD:?CLICKHOUSE_ML_READER_PASSWORD must be set}"
+: "${CLICKHOUSE_ML_PASSWORD:?CLICKHOUSE_ML_READER_PASSWORD must be set}"
 #Không dùng echo vì echo sẽ gây thêm dấu \n, awk để tách chuỗi theo khoản trắng và chỉ lấy chuỗi đầu tiên
 sha256_hash() {
     printf '%s' "$1" | sha256sum | awk '{print $1}'

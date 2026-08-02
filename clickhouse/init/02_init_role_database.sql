@@ -54,6 +54,8 @@ TO fraudguard_transformer_role;
 -- phục vụ machine learning
 
 GRANT SELECT ON fraudguard_ml.* TO fraudguard_ml_reader_role;
+GRANT SELECT ON fraudguard_core.fct_transactions TO fraudguard_ml_reader_role;
+
 ALTER ROLE fraudguard_ml_reader_role
 SETTINGS
     readonly = 1,
@@ -69,6 +71,7 @@ TO fraudguard_superset_role;
 
 GRANT SELECT ON fraudguard_monitoring.*
 TO fraudguard_superset_role;
+
 
 ALTER ROLE fraudguard_superset_role
 SETTINGS

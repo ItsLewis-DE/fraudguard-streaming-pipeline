@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import clickhouse_connect
@@ -12,9 +12,9 @@ class ClickHouseSettings:
     host: str
     port: int
     username: str
-    password: str
     database: str
     secure: bool
+    password: str = field(repr=False)
 
     @classmethod
     def from_env(cls) -> ClickHouseSettings:
@@ -62,4 +62,5 @@ def create_clickhouse_client(settings: ClickHouseSettings) -> Any:
         password=settings.password,
         database=settings.database,
         secure=settings.secure,
+        settings={"readonly": 1},  # Cái này để cho clickhouse
     )

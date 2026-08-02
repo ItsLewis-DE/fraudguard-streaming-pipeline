@@ -9,6 +9,7 @@ from pathlib import Path
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from pydantic import ValidationError
 
+from fraudguard_ml.artifacts import ArtifactError, build_artifact, write_json_atomic
 from fraudguard_ml.clickhouse import (
     ClickHouseSettings,
     create_clickhouse_client,
@@ -43,17 +44,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate = subparsers.add_parser("validate-training-data")
     validate.add_argument("--config", type=Path, required=True)
+    validate.add_argument(
+        "--output", type=Path, default=Path("artifacts/ml/training_data_contract.json")
+    )
     return parser
 
 
-def run_validate_training_data(config_path: Path) -> int:
+def run_validate_training_data(config_path: Path, output_path: Path) -> int:
     config = load_yaml_config(config_path, TrainingDataContractConfig)
     client = create_clickhouse_client(ClickHouseSettings.from_env())
     try:
         report = validate_training_data_contract(client, config)
     finally:
         client.close()
-    print(json.dumps(asdict(report), indent=2, sort_keys=True))
+
+    report_dict = asdict(report)
+    repository_root = Path.cwd()
+    artifact = build_artifact(
+        report=report_dict,
+        repository_root=repository_root,
+        contract_path=config_path,
+        lock_path=repository_root / "poetry.lock",
+        dbt_manifest_path=repository_root / "target" / "manifest.json",
+        relevant_paths=[repository_root / "ml" / "src"],
+    )
+
+    write_json_atomic(output_path, artifact)
+    print(f"\nReport successfully saved to: {output_path}")
     return 0
 
 
@@ -89,11 +106,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.command == "smoke":
             exit_code = run_smoke(args.config, args.json_output)
         elif args.command == "validate-training-data":
-            exit_code = run_validate_training_data(args.config)
+            exit_code = run_validate_training_data(args.config, args.output)
         else:
             parser.error(f"Unknown command: {args.command}")
     except (OSError, ValueError, ValidationError) as exc:
         parser.exit(2, f"configuration error: {exc}\n")
+    except ArtifactError as exc:
+        parser.exit(2, f"artifact error: {exc}\n")
     except DataContractError as exc:
         parser.exit(2, f"contract error: {exc}\n")
     except ClickHouseError:

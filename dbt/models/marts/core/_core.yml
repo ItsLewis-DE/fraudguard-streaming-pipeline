@@ -10,6 +10,19 @@ models:
       asset, not an inference feature contract or a final feature allowlist.
       PaySim is synthetic, so results derived from this relation do not establish
       performance on real banking data.
+    meta:
+      owner: phongthanh
+      purpose: "Canonical transaction fact used for audit, analytics and downstream label joins."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the five-minute dbt build schedule."
+      quality_slo:
+        required_checks: [business_key_not_null, canonical_row_per_business_key]
+        invalid_amount_count: 0
+        invalid_balance_count: 0
+        invalid_record_action: exclude_from_training_and_alert
     columns:
       - name: source
         description: Synthetic-data source namespace used with event_id as the business key.
@@ -92,6 +105,19 @@ models:
       PaySim rule flag for offline analysis only. The source does not provide
       observed_at, available_at, or label-maturity history, so this relation must
       not be treated as a point-in-time inference input.
+    meta:
+      owner: phongthanh
+      purpose: "Canonical final-label fact used for offline fraud evaluation and label reconciliation."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the five-minute dbt build schedule; label arrival is delayed in production."
+      quality_slo:
+        required_checks: [business_key_not_null, binary_label_domain, canonical_row_per_business_key]
+        invalid_label_count: 0
+        label_maturity_history: unavailable_in_paysim
+        invalid_record_action: exclude_from_training_and_alert
     columns:
       - name: source
         description: Synthetic-data source namespace used with event_id as the business key.
@@ -149,6 +175,18 @@ models:
       canonical (source, event_id) transaction, including transactions without a
       matching final label. Labels and readiness flags in this model are not an
       inference contract.
+    meta:
+      owner: phongthanh
+      purpose: "Offline training-readiness join that preserves unlabeled and conflicted candidates for audit."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the five-minute dbt build schedule."
+      quality_slo:
+        required_checks: [business_key_not_null, label_join_reconciliation, exclusion_reason_not_null]
+        exclusion_reason_coverage: 100
+        invalid_record_action: route_to_exclusion_summary
     columns:
       - name: source
         description: Synthetic-data source namespace used with event_id as the business key.

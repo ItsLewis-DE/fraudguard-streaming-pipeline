@@ -3,7 +3,7 @@ experiment_name: fraudguard_balance_challenger
 
 dataset:
   relation: fraudguard_ml.ml_training_transactions
-  prediction_point: post_transaction_event
+  prediction_point: post_ledger_update
   id_columns: [source, event_id]
   split_columns: [event_time, event_date, step]
   feature_columns:

@@ -3,7 +3,7 @@ experiment_name: fraudguard_logistic_baseline
 
 dataset:
   relation: fraudguard_ml.ml_training_transactions
-  prediction_point: post_transaction_event
+  prediction_point: post_ledger_update
   id_columns:
     - source
     - event_id

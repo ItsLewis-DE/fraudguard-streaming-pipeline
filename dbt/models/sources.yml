@@ -7,14 +7,32 @@ sources:
       MinIO batches. These relations are not direct ML training inputs.
     schema: "{{ env_var('DBT_CLICKHOUSE_DATABASE', 'fraudguard') }}"
     meta:
-      owner: fraud-platform
+      owner: phongthanh
+      purpose: "Governed raw ingestion and quality evidence for FraudGuard pipelines."
       contract_version: 1
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 5
+        error_after_minutes: 15
+        basis: "The ingestion DAG polls for completed batches every minute."
+      quality_slo:
+        business_key_null_rate: 0
+        schema_or_domain_violation_rate: 0
+        reconciliation_error_count: 0
+    freshness:
+          warn_after: {count: 5, period: minute}
+          error_after: {count: 15, period: minute}
+    loaded_at_field: loaded_at
 
     tables:
       - name: transactions
         description: >
           Physical PaySim transaction rows. Retry duplicates are intentionally
           retained. Business key is (source, event_id).
+        meta:
+          purpose: "Raw transaction events retained for canonicalization and audit."
+          quality_slo:
+            required_checks: [business_key_not_null, event_time_not_null]
         columns:
           - name: source
             data_tests: [not_null]
@@ -24,11 +42,18 @@ sources:
             data_tests: [not_null]
           - name: minio_batch_id
             data_tests: [not_null]
+          - name: loaded_at
+            description: ClickHouse load timestamp used for source freshness.
+            data_tests: [not_null]
 
       - name: transaction_labels
         description: >
           Physical final PaySim label rows. No observed_at, delayed-label,
           correction or label-maturity semantics.
+        meta:
+          purpose: "Raw final-label events used for offline label joins and audit."
+          quality_slo:
+            required_checks: [business_key_not_null, binary_label_domain]
         columns:
           - name: source
             data_tests: [not_null]
@@ -48,11 +73,21 @@ sources:
                     values: [0, 1]
           - name: minio_batch_id
             data_tests: [not_null]
+          - name: loaded_at
+            description: ClickHouse load timestamp used for source freshness.
+            data_tests: [not_null]
 
       - name: ingestion_batches
         description: >
           Append-only Airflow attempt ledger. A batch is committed once any
           attempt has status success.
+        meta:
+          purpose: "Operational ledger for batch discovery, commit markers and retries."
+          data_classification: internal_operational
+          quality_slo:
+            required_checks: [batch_identity_not_null, status_domain]
+            reconciliation_error_count: 0
+        loaded_at_field: finished_at
         columns:
           - name: pipeline
             data_tests:
@@ -68,11 +103,21 @@ sources:
               - accepted_values:
                   arguments:
                     values: ["success", "failed"]
+          - name: finished_at
+            description: Completion timestamp used for source freshness.
+            data_tests: [not_null]
 
       - name: ingestion_batch_quality
         description: >
           Physical quality manifests with the invariant
           input_rows = valid_rows + quarantine_rows.
+        meta:
+          purpose: "Batch-level quality evidence and reconciliation metrics."
+          data_classification: internal_operational
+          quality_slo:
+            reconciliation_error_count: 0
+            negative_count_row_count: 0
+            required_checks: [batch_identity_not_null, row_count_reconciliation]
         columns:
           - name: pipeline
             data_tests:
@@ -89,4 +134,7 @@ sources:
           - name: valid_rows
             data_tests: [not_null]
           - name: quarantine_rows
+            data_tests: [not_null]
+          - name: loaded_at
+            description: ClickHouse load timestamp used for source freshness.
             data_tests: [not_null]

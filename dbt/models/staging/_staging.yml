@@ -3,6 +3,17 @@ version: 2
 models:
   - name: stg_transactions
     description: One row per physical transaction row loaded into ClickHouse.
+    meta:
+      owner: phongthanh
+      purpose: "Typed staging view for raw transaction events before canonicalization."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 10
+        error_after_minutes: 30
+        basis: "Inherited from governed transaction source freshness."
+      quality_slo:
+        required_checks: [business_key_not_null, event_time_not_null]
+        invalid_record_action: block_downstream
     columns:
       - name: source
         data_tests: [not_null]
@@ -17,6 +28,17 @@ models:
 
   - name: stg_transaction_labels
     description: One row per physical final-label row.
+    meta:
+      owner: phongthanh
+      purpose: "Typed staging view for final labels before canonical label ranking."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 10
+        error_after_minutes: 30
+        basis: "Inherited from governed label source freshness."
+      quality_slo:
+        required_checks: [business_key_not_null, binary_label_domain]
+        invalid_record_action: block_downstream
     columns:
       - name: source
         data_tests: [not_null]
@@ -37,6 +59,17 @@ models:
 
   - name: stg_ingestion_batches
     description: One row per Airflow load attempt.
+    meta:
+      owner: phongthanh
+      purpose: "Typed staging view for the ingestion attempt and commit ledger."
+      data_classification: internal_operational
+      freshness_slo:
+        warn_after_minutes: 10
+        error_after_minutes: 30
+        basis: "Inherited from the batch ledger source freshness."
+      quality_slo:
+        required_checks: [batch_identity_not_null, status_domain]
+        invalid_record_action: block_downstream
     columns:
       - name: pipeline
         data_tests:
@@ -55,6 +88,18 @@ models:
 
   - name: stg_ingestion_batch_quality
     description: One physical quality-manifest row per batch/date/source.
+    meta:
+      owner: phongthanh
+      purpose: "Typed staging view for batch-level data-quality evidence."
+      data_classification: internal_operational
+      freshness_slo:
+        warn_after_minutes: 10
+        error_after_minutes: 30
+        basis: "Inherited from the quality-manifest source freshness."
+      quality_slo:
+        required_checks: [batch_identity_not_null, row_count_reconciliation]
+        reconciliation_error_count: 0
+        invalid_record_action: block_downstream
     columns:
       - name: pipeline
         data_tests: [not_null]

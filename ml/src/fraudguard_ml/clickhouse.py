@@ -18,36 +18,36 @@ class ClickHouseSettings:
 
     @classmethod
     def from_env(cls) -> ClickHouseSettings:
-        password = os.getenv("ML_CLICKHOUSE_PASSWORD")
+        password = os.getenv("CLICKHOUSE_ML_PASSWORD")
         if not password:
-            raise ValueError("ML_CLICKHOUSE_PASSWORD must be set")
+            raise ValueError("CLICKHOUSE_ML_PASSWORD must be set")
 
-        port_text = os.getenv("ML_CLICKHOUSE_PORT", "8123")
+        port_text = os.getenv("CLICKHOUSE_ML_PORT", "8123")
         try:
             port = int(port_text)
         except ValueError as exc:
-            raise ValueError("ML_CLICKHOUSE_PORT must be an integer") from exc
+            raise ValueError("CLICKHOUSE_ML_PORT must be an integer") from exc
         if not 1 <= port <= 65535:
-            raise ValueError("ML_CLICKHOUSE_PORT must be between 1 and 65535")
+            raise ValueError("CLICKHOUSE_ML_PORT must be between 1 and 65535")
 
-        secure_text = os.getenv("ML_CLICKHOUSE_SECURE", "false").lower()
+        secure_text = os.getenv("CLICKHOUSE_ML_SECURE", "false").lower()
         if secure_text not in {"true", "false"}:
-            raise ValueError("ML_CLICKHOUSE_SECURE must be true or false")
+            raise ValueError("CLICKHOUSE_ML_SECURE must be true or false")
 
         username = os.getenv(
-            "ML_CLICKHOUSE_USER",
+            "CLICKHOUSE_ML_USER",
             "fraudguard_ml_reader",
         )
         if username != "fraudguard_ml_reader":
             raise ValueError("ML validator must use fraudguard_ml_reader")
 
         return cls(
-            host=os.getenv("ML_CLICKHOUSE_HOST", "localhost"),
+            host=os.getenv("CLICKHOUSE_ML_HOST", "localhost"),
             port=port,
             username=username,
             password=password,
             database=os.getenv(
-                "ML_CLICKHOUSE_DATABASE",
+                "CLICKHOUSE_ML_DATABASE",
                 "fraudguard",
             ),
             secure=secure_text == "true",

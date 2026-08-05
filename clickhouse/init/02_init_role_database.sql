@@ -55,6 +55,8 @@ TO fraudguard_transformer_role;
 
 GRANT SELECT ON fraudguard_ml.* TO fraudguard_ml_reader_role;
 GRANT SELECT ON fraudguard_core.fct_transactions TO fraudguard_ml_reader_role;
+GRANT SELECT ON system.tables
+TO fraudguard_loader_role;
 
 ALTER ROLE fraudguard_ml_reader_role
 SETTINGS

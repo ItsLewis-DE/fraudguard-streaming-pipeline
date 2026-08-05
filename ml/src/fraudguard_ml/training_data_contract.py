@@ -292,7 +292,7 @@ def validate_training_data_contract(
         )
     metrics_result = client.query(
         f"""
-        lineage as (
+        with lineage as (
             select source,event_id, toUInt8(1) as lineage_matched
             from {lineage.quoted()}
         )
@@ -331,7 +331,7 @@ def validate_training_data_contract(
                     != abs(origin_balance_delta - amount)
                 or destination_amount_residual
                     != abs(destination_balance_delta - amount)
-            ) as invalid_formula_count
+            ) as invalid_formula_count,
             countIf(l.lineage_matched =0) as missing_lineage_count
         from {relation.quoted()} as t 
         left join lineage as l

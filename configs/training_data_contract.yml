@@ -20,12 +20,12 @@ transaction_type_domain:
   - TRANSFER
 
 expected_columns:
-  - {name: source, clickhouse_type: String}
+  - {name: source, clickhouse_type: LowCardinality(String)}
   - {name: event_id, clickhouse_type: String}
   - {name: event_time, clickhouse_type: "DateTime64(3, 'UTC')"}
   - {name: event_date, clickhouse_type: Date}
   - {name: step, clickhouse_type: UInt16}
-  - {name: transaction_type, clickhouse_type: String}
+  - {name: transaction_type, clickhouse_type: LowCardinality(String)}
   - {name: amount, clickhouse_type: "Decimal(18, 2)"}
   - {name: origin_balance_before, clickhouse_type: "Decimal(18, 2)"}
   - {name: origin_balance_after, clickhouse_type: "Decimal(18, 2)"}

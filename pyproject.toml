@@ -15,6 +15,7 @@ dependencies = [
     "psutil>=7,<8",
     "pydantic>=2.12,<3",
     "pyyaml>=6,<7",
+    "seaborn>=0.13.2",
 ]
 
 [project.scripts]
@@ -30,7 +31,10 @@ include = ["fraudguard_ml*"] #Giúp lấy các file python để đóng gói
 [dependency-groups]
 dev = [
     "dbt-clickhouse==1.10.1",
+    "ipykernel>=7,<8",
+    "matplotlib>=3.10,<4",
     "mypy>=1.17,<2",
+    "nbconvert>=7.16,<8",
     "pre-commit>=4,<5",
     "pytest>=8,<10",
     "pytest-cov>=6,<8",

@@ -1,0 +1,5 @@
+check,absolute_gap,unit
+fraud_rate_gap,0.008582044818015219,percentage points
+max_type_share_gap,0.07076104969336583,percentage points
+max_step_day_share_gap,0.07616411006786533,percentage points
+max_zero_rate_gap,0.12368785028809004,percentage points

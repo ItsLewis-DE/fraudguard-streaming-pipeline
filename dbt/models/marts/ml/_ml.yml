@@ -19,8 +19,6 @@ models:
         basis: "Training candidates are refreshed by the scheduled dbt build, not per-event inference."
       quality_slo:
         required_checks: [business_key_not_null, eligibility_partition_reconciles, exclusion_reason_not_null]
-        unlabeled_candidate_action: exclude_and_count
-        invalid_record_action: exclude_and_count
     columns:
       - name: source
         description: Synthetic-data source namespace; a structural key and not an approved feature.
@@ -119,9 +117,6 @@ models:
         basis: "Training data is refreshed by the scheduled dbt build and consumed offline."
       quality_slo:
         required_checks: [business_key_not_null, target_domain, feature_allowlist_review]
-        excluded_candidate_count: reconciled_to_ml_training_candidates
-        leakage_review: required_before_model_promotion
-        invalid_record_action: block_training
     columns:
       - name: source
         description: Synthetic-data source namespace; structural key, not a feature.

@@ -28,3 +28,7 @@ htmlcov/
 
 AGENTS.md
 docs
+!docs/
+docs/*
+!docs/mart_to_training/
+!docs/mart_to_training/**

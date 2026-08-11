@@ -156,9 +156,7 @@ mass tại 0 chi phối toàn bộ biểu đồ. Vì mỗi nhãn được chuẩ
 histogram là so sánh *hình dạng*, không phải so sánh số giao dịch tuyệt đối.
 
 ```python
-positive_balance_long = balance_long.loc[
-    balance_long["balance"].gt(0)
-].copy()
+positive_balance_long = balance_long.loc[balance_long["balance"].gt(0)].copy()
 
 fig, axes = plt.subplots(
     nrows=2,
@@ -211,9 +209,9 @@ correlation_feature_columns = [
     "destination_amount_residual",
 ]
 
-feature_correlation = balance_diagnostic_sample[
-    correlation_feature_columns
-].corr(method="pearson")
+feature_correlation = balance_diagnostic_sample[correlation_feature_columns].corr(
+    method="pearson"
+)
 
 display(feature_correlation.round(4))
 
@@ -290,6 +288,7 @@ def point_biserial_with_target(
         .reset_index(drop=True)
     )
 
+
 target_correlation_columns = [
     "step",
     "amount",
@@ -339,6 +338,7 @@ def chi_square_and_cramers_v(
 
     return chi_square, cramers_v, int(n), int(degrees_of_freedom)
 
+
 type_target_contingency = pd.crosstab(
     balance_diagnostic_sample["type"],
     balance_diagnostic_sample["isFraud"],
@@ -359,9 +359,7 @@ display(
     )
 )
 
-type_target_contingency.to_csv(
-    REPORT_DIR / "type_target_contingency_diagnostic.csv"
-)
+type_target_contingency.to_csv(REPORT_DIR / "type_target_contingency_diagnostic.csv")
 ```
 
 ## Cách ghi kết luận sau khi chạy

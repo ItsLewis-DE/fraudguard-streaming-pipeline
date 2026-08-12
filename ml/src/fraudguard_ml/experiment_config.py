@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, PositiveFloat, PositiveInt, field_validator, model_validator
 
-from fraudguard_ml.config import StrictModel
+from fraudguard_ml.config import RuntimeConfig, StrictModel
 from fraudguard_ml.training_data_contract import (
     IDENTIFIER_PATTERN,
     DataContractError,
@@ -79,3 +79,61 @@ class DatasetConfig(StrictModel):
         if "event_time" not in self.split_columns:
             raise ValueError("split_columns must contain event_time")
         return self
+
+class SplitConfig(StrictModel):
+    strategy: Literal["temporal"]
+    train_end: str
+    validation_end: str
+    test_end: str
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        train_end = parse_utc(self.train_end)
+        validation_end = parse_utc(self.validation_end)
+        test_end = parse_utc(self.test_end)
+        if not train_end < validation_end < test_end:
+            raise ValueError("split boundaries must be strictly increasing")
+        return self
+
+class SnapshotConfig(StrictModel):
+    storage_uri: str
+    format: Literal["parquet"] = "parquet"
+    compression: Literal["zstd"] = "zstd"
+    fingerprint_algorithm: Literal["clickhouse_cityhash64_xor_v1"]
+    label_policy: Literal["static_final_labels"]
+
+    @field_validator("storage_uri")
+    @classmethod
+    def validate_storage_uri(cls, value: str) -> str:
+        if not value.startswith("s3://"):
+            raise ValueError("snapshot.storage_uri must start with s3://")
+        if value.endswith("/"):
+            return value.rstrip("/")
+        return value
+
+class ModelConfig(StrictModel):
+    kind: Literal["logistic_regression"]
+    class_weight: Literal["balanced"] = "balanced"
+    regularization_c: PositiveFloat = 1.0
+    max_iter: PositiveInt = 500
+
+class EvaluationConfig(StrictModel):
+    threshold_strategy: Literal["max_recall_at_min_precision"]
+    min_precision: float = Field(0.10, gt=0.0, le=1.0)
+
+class ExperimentConfig(StrictModel):
+    schema_version: Literal[1]
+    experiment_name: str
+    dataset: DatasetConfig
+    split: SplitConfig
+    snapshot: SnapshotConfig
+    model: ModelConfig
+    evaluation: EvaluationConfig
+    runtime: RuntimeConfig
+
+    @field_validator("experiment_name")
+    @classmethod
+    def validate_experiment_name(cls, value: str) -> str:
+        if IDENTIFIER_PATTERN.fullmatch(value) is None:
+            raise ValueError("experiment_name must be a safe identifier")
+        return value

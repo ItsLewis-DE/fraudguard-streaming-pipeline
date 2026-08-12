@@ -35,5 +35,22 @@ split:
   validation_end: "2026-01-26T20:00:00Z"
   test_end: "2026-01-31T23:00:00Z"
 
+snapshot:
+  storage_uri: s3://fraud-training-snapshots
+  format: parquet
+  compression: zstd
+  fingerprint_algorithm: clickhouse_cityhash64_xor_v1
+  label_policy: static_final_labels
+
+model:
+  kind: logistic_regression
+  class_weight: balanced
+  regularization_c: 1.0
+  max_iter: 500
+
+evaluation:
+  threshold_strategy: max_recall_at_min_precision
+  min_precision: 0.10
+
 runtime:
   random_seed: 42

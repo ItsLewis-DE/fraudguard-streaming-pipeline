@@ -105,3 +105,17 @@ def write_json_atomic(destination: Path, payload: Mapping[str, Any]) -> None:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+def write_json_immutable(destination: Path, payload: Mapping[str, Any]) -> None:
+    if destination.exists():
+        raise ArtifactError(f"refusing to overwrite immutable artifact: {destination}")
+    write_json_atomic(destination, payload)
+
+def canonical_json_sha256(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

@@ -1,3 +1,15 @@
+"""Collect reproducibility-relevant CPU, memory, Python, and GPU metadata.
+
+Flow:
+    1. Measure logical and container-available CPUs plus host memory.
+    2. Optionally import PyTorch and probe usable CUDA devices defensively.
+    3. Enforce ``require_gpu`` when requested by configuration.
+    4. Return an immutable metadata record for logs and artifacts.
+
+Optional GPU discovery never makes CPU-only runs fail because of a broken or
+partially installed CUDA stack.
+"""
+
 from __future__ import annotations
 
 import importlib
@@ -13,6 +25,8 @@ from fraudguard_ml.config import RuntimeConfig
 
 
 class GpuDevice(BaseModel):
+    """Serializable identity and memory capacity of one CUDA device."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     index: int
@@ -21,6 +35,8 @@ class GpuDevice(BaseModel):
 
 
 class RuntimeMetadata(BaseModel):
+    """Environment facts needed to explain and reproduce an ML run."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     random_seed: int
@@ -42,6 +58,8 @@ class GpuRequiredError(RuntimeError):
 
 
 def _available_cpu_count() -> int:
+    """Return CPUs available to this process, respecting affinity constraints."""
+
     if hasattr(os, "sched_getaffinity"):
         try:
             return max(1, len(os.sched_getaffinity(0)))
@@ -52,6 +70,8 @@ def _available_cpu_count() -> int:
 
 
 def _load_torch() -> Any | None:
+    """Import optional PyTorch safely, returning ``None`` when unusable."""
+
     try:
         return importlib.import_module("torch")
     except (ImportError, OSError):
@@ -60,6 +80,8 @@ def _load_torch() -> Any | None:
 
 
 def _detect_torch_cuda() -> tuple[bool, str | None, tuple[GpuDevice, ...]]:
+    """Probe PyTorch CUDA and return availability, backend name, and devices."""
+
     torch = _load_torch()
     if torch is None:
         return False, None, ()
@@ -87,6 +109,8 @@ def _detect_torch_cuda() -> tuple[bool, str | None, tuple[GpuDevice, ...]]:
 
 
 def collect_runtime_metadata(config: RuntimeConfig) -> RuntimeMetadata:
+    """Collect runtime facts and enforce the configured GPU requirement."""
+
     memory = psutil.virtual_memory()
     gpu_available, gpu_backend, gpu_devices = _detect_torch_cuda()
 

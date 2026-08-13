@@ -1,3 +1,18 @@
+"""Create immutable, temporally partitioned snapshots from validated mart data.
+
+End-to-end flow:
+    1. Verify that the training-data contract passed for the configured relation.
+    2. Stream the bounded population from ClickHouse in Arrow record batches.
+    3. Write Parquet incrementally while accumulating total/split statistics and
+       a population fingerprint; atomically expose the file only when complete.
+    4. Upload the immutable snapshot to S3/MinIO using SHA-256 verification.
+    5. Build, validate, persist, and upload a provenance-rich dataset manifest.
+    6. Upload the exact contract artifact alongside the snapshot and manifest.
+
+The module avoids loading the entire dataset into memory and fails closed when a
+split is empty, lacks fraud positives, or conflicts with an existing artifact.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -33,16 +48,21 @@ HELPER_HASH_COLUMN = "__population_hash"
 
 
 class SnapshotError(RuntimeError):
-    """A dataset snapshot could not be created safely."""
+    """Raised when a dataset snapshot cannot be created or trusted safely."""
+
 
 @dataclass
 class MutableStats:
+    """Streaming accumulator converted to a validated partition summary later."""
+
     row_count: int = 0
     fraud_count: int = 0
     min_event_time: pd.Timestamp | None = None
     max_event_time: pd.Timestamp | None = None
 
     def update(self, event_time: pd.Series, target: NDArray[np.uint8]) -> None:
+        """Merge one Arrow batch's timestamps and binary labels into the totals."""
+
         if len(event_time) == 0:
             return
         self.row_count += len(event_time)
@@ -55,6 +75,8 @@ class MutableStats:
             self.max_event_time = current_max
 
     def freeze(self) -> PartitionStatistics:
+        """Convert mutable counters into an immutable, self-validating model."""
+
         rate = self.fraud_count / self.row_count if self.row_count else 0.0
         return PartitionStatistics(
             row_count=self.row_count,
@@ -72,13 +94,26 @@ class MutableStats:
             ),
         )
 
+
 def unique_in_order(columns: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(columns)) #Ép về tuple là vì sẽ kh cho phép chỉnh sửa
+    """Remove duplicate column names while preserving projection order."""
+
+    return tuple(dict.fromkeys(columns))  # Ép về tuple là vì sẽ kh cho phép chỉnh sửa
+
 
 def quote_identifier(value: str) -> str:
+    """Quote a previously validated ClickHouse identifier."""
+
     return f"`{value}`"
 
+
 def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str]]:
+    """Build the snapshot query and its separately bound temporal parameter.
+
+    The helper hash is used only for a stable population fingerprint and is
+    removed before rows are written to the training Parquet file.
+    """
+
     relation = RelationName.parse(config.dataset.relation)
     columns = unique_in_order(
         (
@@ -89,7 +124,7 @@ def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str
         )
     )
     projection = ",\n            ".join(quote_identifier(name) for name in columns)
-    #Hash để kiểm tra xem dữ liệu giữa bashline và challenger có thay đổi k
+    # Hash để kiểm tra xem dữ liệu giữa bashline và challenger có thay đổi k
     query = f"""
         select
             {projection},
@@ -102,15 +137,22 @@ def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str
 
 
 def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
+    """Hash normalized SQL plus sorted parameters for query-level provenance."""
+
     payload = {
         "query": " ".join(query.split()),
         "parameters": dict(sorted(parameters.items())),
     }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode() #encode chuyển string
-    #thành bytes
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode()  # encode chuyển string
+    # thành bytes
     return hashlib.sha256(encoded).hexdigest()
 
+
 def validate_contract_artifact(path: Path, expected_relation: str) -> None:
+    """Require a successful contract artifact for the experiment's relation."""
+
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -121,12 +163,15 @@ def validate_contract_artifact(path: Path, expected_relation: str) -> None:
     if relation != expected_relation:
         raise SnapshotError("contract relation does not match experiment relation")
 
+
 def update_split_stats(
     stats: dict[str, MutableStats],
     event_time: pd.Series,
     target: NDArray[np.uint8],
     config: ExperimentConfig,
 ) -> None:
+    """Assign a batch to temporal splits and update each split accumulator."""
+
     train_end = pd.Timestamp(parse_utc(config.split.train_end))
     validation_end = pd.Timestamp(parse_utc(config.split.validation_end))
     train_mask = event_time.le(train_end).to_numpy()
@@ -141,11 +186,18 @@ def update_split_stats(
     ):
         stats[name].update(event_time[mask], target[mask])
 
+
 def stream_snapshot(
     client: Any,
     config: ExperimentConfig,
     destination: Path,
 ) -> tuple[PartitionStatistics, SplitStatistics, str, str]:
+    """Stream ClickHouse rows into one atomic Parquet snapshot.
+
+    Returns overall statistics, per-split statistics, the population fingerprint,
+    and the canonical query hash. Temporary files are removed on every failure.
+    """
+
     if destination.exists():
         raise SnapshotError(f"refusing to overwrite snapshot: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -206,8 +258,12 @@ def stream_snapshot(
         canonical_query_sha256(query, parameters),
     )
 
+
 def join_s3_uri(root: str, *parts: str) -> str:
+    """Join an S3 root and path components without duplicate separators."""
+
     return "/".join([root.rstrip("/"), *(part.strip("/") for part in parts)])
+
 
 def create_snapshot_and_manifest(
     *,
@@ -222,6 +278,13 @@ def create_snapshot_and_manifest(
     output_dir: Path,
     now_utc: datetime | None = None,
 ) -> DatasetManifest:
+    """Orchestrate contract verification, snapshot creation, and publication.
+
+    The returned :class:`DatasetManifest` links the source relation, exact query,
+    local inputs, Git revision, split quality statistics, and uploaded Parquet
+    digest. All three published files use immutable object-storage semantics.
+    """
+
     validate_contract_artifact(contract_artifact_path, config.dataset.relation)
     output_dir.mkdir(parents=True, exist_ok=True)
     parquet_path = output_dir / "data.parquet"
@@ -287,4 +350,3 @@ def create_snapshot_and_manifest(
     )
     upload_file_immutable(s3_client, contract_artifact_path, contract_uri)
     return manifest
-

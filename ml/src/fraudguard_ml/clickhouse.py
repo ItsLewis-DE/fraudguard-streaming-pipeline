@@ -1,3 +1,14 @@
+"""Create a least-privilege ClickHouse client for ML data validation.
+
+Flow:
+    1. Read connection settings from ``CLICKHOUSE_ML_*`` variables.
+    2. Validate port, TLS mode, password presence, and the approved reader user.
+    3. Create a client with ClickHouse's read-only session setting enabled.
+
+Keeping this policy at the connection boundary prevents validation code from
+accidentally mutating the analytical source tables.
+"""
+
 from __future__ import annotations
 
 import os
@@ -9,6 +20,8 @@ import clickhouse_connect
 
 @dataclass(frozen=True)
 class ClickHouseSettings:
+    """Validated connection settings for the dedicated ML reader account."""
+
     host: str
     port: int
     username: str
@@ -18,6 +31,8 @@ class ClickHouseSettings:
 
     @classmethod
     def from_env(cls) -> ClickHouseSettings:
+        """Load settings from the environment and reject unsafe values."""
+
         password = os.getenv("CLICKHOUSE_ML_PASSWORD")
         if not password:
             raise ValueError("CLICKHOUSE_ML_PASSWORD must be set")
@@ -55,6 +70,8 @@ class ClickHouseSettings:
 
 
 def create_clickhouse_client(settings: ClickHouseSettings) -> Any:
+    """Return a ClickHouse client constrained to read-only queries."""
+
     return clickhouse_connect.get_client(
         host=settings.host,
         port=settings.port,

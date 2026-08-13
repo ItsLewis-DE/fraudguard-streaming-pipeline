@@ -32,3 +32,5 @@ docs
 docs/*
 !docs/mart_to_training/
 !docs/mart_to_training/**
+!docs/feature_lifecycle/
+!docs/feature_lifecycle/**

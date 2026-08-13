@@ -10,15 +10,6 @@ select
     origin_balance_after,
     destination_balance_before,
     destination_balance_after,
-    origin_balance_before - origin_balance_after as origin_balance_delta,
-    destination_balance_after - destination_balance_before
-        as destination_balance_delta,
-    abs(
-        (origin_balance_before - origin_balance_after) - amount
-    ) as origin_amount_residual,
-    abs(
-        (destination_balance_after - destination_balance_before) - amount
-    ) as destination_amount_residual,
     is_fraud,
     has_final_label,
     has_payload_conflict,

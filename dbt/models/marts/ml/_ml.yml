@@ -53,14 +53,6 @@ models:
         description: Destination balance immediately before the transaction.
       - name: destination_balance_after
         description: Destination balance after the ledger update; pending M2 leakage audit before feature use.
-      - name: origin_balance_delta
-        description: Origin before-minus-after balance delta; audit candidate pending M2 leakage review.
-      - name: destination_balance_delta
-        description: Destination after-minus-before balance delta; audit candidate pending M2 leakage review.
-      - name: origin_amount_residual
-        description: Absolute difference between the origin balance delta and amount; pending M2 leakage review.
-      - name: destination_amount_residual
-        description: Absolute difference between the destination balance delta and amount; pending M2 leakage review.
       - name: is_fraud
         description: Final synthetic target for offline use; unmatched-label rows may carry join defaults.
         data_tests:
@@ -151,14 +143,6 @@ models:
         description: Destination balance immediately before the transaction.
       - name: destination_balance_after
         description: Post-ledger destination balance; pending M2 leakage audit before feature use.
-      - name: origin_balance_delta
-        description: Origin before-minus-after balance delta; pending M2 leakage audit.
-      - name: destination_balance_delta
-        description: Destination after-minus-before balance delta; pending M2 leakage audit.
-      - name: origin_amount_residual
-        description: Origin balance-delta residual against amount; pending M2 leakage audit.
-      - name: destination_amount_residual
-        description: Destination balance-delta residual against amount; pending M2 leakage audit.
       - name: is_fraud
         description: Final synthetic PaySim target for supervised training; never an inference feature.
         data_tests:

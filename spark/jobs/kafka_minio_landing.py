@@ -1,3 +1,20 @@
+"""Shared Structured Streaming pipeline from Kafka to immutable MinIO landings.
+
+End-to-end flow:
+    1. Load every writer schema plus the latest reader schema from Schema Registry.
+    2. Read raw Kafka records and inspect their Confluent wire-format headers.
+    3. Route malformed envelopes directly to quarantine.
+    4. Decode supported Avro payloads with writer/reader schema resolution, then
+       apply the pipeline-specific business validation expression.
+    5. For each micro-batch, write valid Parquet, replayable quarantine records,
+       and a reconciliation manifest; the manifest is written last and acts as
+       the batch-completion signal consumed by Airflow.
+    6. Use the Spark checkpoint to preserve streaming offsets across restarts.
+
+Transaction and label entry points supply only their configuration and validation
+policy, keeping delivery semantics and observability consistent across pipelines.
+"""
+
 import json
 import logging
 import time
@@ -32,6 +49,8 @@ UNKNOWN_SOURCE = "unknown"
 
 @dataclass(frozen=True)
 class SchemaCatalog:
+    """Writer schemas and the latest reader schema for one registry subject."""
+
     subject: str
     reader_schema_id: int
     reader_schema: str
@@ -40,6 +59,8 @@ class SchemaCatalog:
 
 @dataclass(frozen=True)
 class LandingConfig:
+    """Immutable runtime contract for one Kafka-to-MinIO landing pipeline."""
+
     pipeline: str
     kafka_topic: str
     kafka_bootstrap_servers: str
@@ -59,6 +80,8 @@ class LandingConfig:
     max_offsets_per_trigger: int = 100
 
     def __post_init__(self) -> None:
+        """Require timestamp and derived partition columns to be configured together."""
+
         if (self.partition_timestamp_column is None) != (self.partition_column is None):
             raise ValueError(
                 "partition_timestamp_column and partition_column must both "
@@ -67,6 +90,8 @@ class LandingConfig:
 
 
 def registry_get(registry_url: str, path: str) -> dict | list:
+    """Fetch and decode one JSON resource from Confluent Schema Registry."""
+
     request = Request(
         f"{registry_url.rstrip('/')}{path}",
         headers={
@@ -82,6 +107,12 @@ def load_schema_catalog_once(
     registry_url: str,
     subject: str,
 ) -> SchemaCatalog:
+    """Load all subject versions once and choose the latest as reader schema.
+
+    Every historical schema remains available as a writer schema so old Kafka
+    messages can be decoded and projected into the current reader representation.
+    """
+
     encoded_subject = quote(subject, safe="")
     versions = registry_get(
         registry_url,
@@ -117,6 +148,8 @@ def load_schema_catalog(
     max_attempts: int = 12,
     retry_seconds: int = 5,
 ) -> SchemaCatalog:
+    """Load a schema catalog with bounded retries for service startup races."""
+
     last_error = None
 
     for attempt in range(1, max_attempts + 1):
@@ -153,6 +186,12 @@ def inspect_confluent_message(
     kafka_df: DataFrame,
     catalog: SchemaCatalog,
 ) -> DataFrame:
+    """Extract Confluent framing metadata and classify invalid Kafka envelopes.
+
+    Valid records retain their raw Avro payload and schema ID for the decoding
+    stage. Invalid records receive a stable ``quarantine_reason`` without decode.
+    """
+
     supported_schema_ids = sorted(catalog.writer_schemas)
 
     inspected_df = (
@@ -200,6 +239,12 @@ def decode_supported_schemas(
     catalog: SchemaCatalog,
     record_column: str,
 ) -> DataFrame:
+    """Decode each supported writer schema and union records by column name.
+
+    Schema-specific branches allow historical payloads to use their exact writer
+    schema while the latest schema provides a common reader projection.
+    """
+
     branches = []
 
     for schema_id, writer_schema in sorted(catalog.writer_schemas.items()):
@@ -229,7 +274,7 @@ def decode_supported_schemas(
 
 
 def prepare_quarantine(df: DataFrame) -> DataFrame:
-    """Keep the original Kafka bytes so failed messages can be replayed."""
+    """Preserve Kafka coordinates and original bytes for replayable failures."""
 
     return (
         df.select(
@@ -329,7 +374,15 @@ def build_process_batch(
     config: LandingConfig,
     catalog: SchemaCatalog,
 ) -> Callable[[DataFrame, int], None]:
+    """Create the ``foreachBatch`` handler bound to config and schema catalog.
+
+    The closure splits header failures from decodable messages, applies business
+    validation, publishes all batch outputs, and always releases cached frames.
+    """
+
     def process_batch(batch_df: DataFrame, batch_id: int) -> None:
+        """Process and publish one idempotently addressed streaming micro-batch."""
+
         if batch_df.isEmpty():
             return
 
@@ -426,6 +479,12 @@ def build_process_batch(
 
 
 def run_landing(config: LandingConfig) -> None:
+    """Start the configured Structured Streaming query and await termination.
+
+    Schema discovery happens before Spark consumes Kafka, preventing a running
+    query from accepting offsets when its decoder contract is unavailable.
+    """
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",

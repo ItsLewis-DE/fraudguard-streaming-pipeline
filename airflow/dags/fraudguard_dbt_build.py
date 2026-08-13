@@ -1,3 +1,16 @@
+"""Schedule and execute the FraudGuard dbt transformation quality gate.
+
+Flow:
+    1. Airflow starts one run every five minutes and prevents overlapping runs.
+    2. A Bash task executes ``dbt build`` against the ClickHouse ``dev`` target.
+    3. dbt builds selected models and runs their tests as one fail-fast operation.
+    4. Airflow retries a transient failure once with exponential backoff and marks
+       the DAG failed when transformation or test validation still does not pass.
+
+The DAG intentionally disables XCom output because dbt logs can be large and the
+task's exit status is the orchestration contract.
+"""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -24,6 +37,8 @@ from airflow.sdk import dag
     tags=["fraudguard", "dbt", "clickhouse"],
 )
 def fraudguard_dbt_build():
+    """Define the single-task DAG that builds and tests ClickHouse dbt models."""
+
     BashOperator(
         task_id="dbt_build",
         bash_command="""

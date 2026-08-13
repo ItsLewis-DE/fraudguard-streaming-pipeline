@@ -1,3 +1,21 @@
+"""Load completed Spark landing batches from MinIO into ClickHouse.
+
+End-to-end flow:
+    1. Verify the four required ClickHouse destination/control tables exist.
+    2. Discover Spark micro-batches only through quality-manifest ``_SUCCESS``
+       markers, then exclude pipeline/batch identities already recorded successful.
+    3. Limit and sort pending work before Airflow dynamically maps load tasks.
+    4. For each batch, validate manifest identity, non-negative counts, unique
+       date/source keys, and input = valid + quarantine reconciliation.
+    5. Compare valid Parquet row count with the manifest before inserting business
+       rows, then persist quality metrics and a successful ingestion result.
+    6. On failure, record a bounded error message when possible and re-raise so
+       Airflow retry and alerting semantics remain intact.
+
+Credentials come from Airflow Connections and are passed to ClickHouse only as
+bound query parameters; they are never embedded directly in SQL text or logs.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -220,6 +238,12 @@ VALUES
 
 # Khi triển khai lên server thật, chỉ cần cấu hình lại Airflow Connections.
 def get_clickhouse_client():
+    """Create a ClickHouse client from the current task's Airflow Connection.
+
+    Host and login are mandatory; port, database, password, and TLS mode use the
+    connection's remaining fields with local-development defaults where allowed.
+    """
+
     connection = get_current_context()["conn"].get(CLICKHOUSE_CONNECTION_ID)
     if not connection.host or not connection.login:
         raise ValueError("ClickHouse connection is incomplete")
@@ -235,6 +259,8 @@ def get_clickhouse_client():
 
 # Hàm này trả về các thông tin runtime cần thiết của MinIO.
 def get_minio_runtime() -> tuple[S3Hook, str, str, str]:
+    """Resolve the MinIO hook, endpoint, access key, and secret for one task run."""
+
     hook = S3Hook(aws_conn_id=MINIO_CONNECTION_ID)
     s3_client = hook.get_conn()
     credentials = hook.get_session().get_credentials()
@@ -267,8 +293,12 @@ def get_minio_runtime() -> tuple[S3Hook, str, str, str]:
     tags=["fraudguard", "minio", "clickhouse"],
 )
 def minio_to_clickhouse():
+    """Define dependency checks, batch discovery, and mapped ingestion tasks."""
+
     @task
     def check_dependencies() -> None:
+        """Fail early unless all destination and ingestion-control tables exist."""
+
         client = get_clickhouse_client()
         try:
             result = client.query(
@@ -289,6 +319,12 @@ def minio_to_clickhouse():
 
     @task
     def discover_batches() -> list[dict[str, Any]]:
+        """Return a bounded, deterministic list of completed but unloaded batches.
+
+        The quality manifest is written last by Spark, so its ``_SUCCESS`` marker
+        acts as the publication boundary and prevents discovery of partial batches.
+        """
+
         hook, _, _, _ = get_minio_runtime()
         client = get_clickhouse_client()
         try:
@@ -349,6 +385,13 @@ def minio_to_clickhouse():
 
     @task(max_active_tis_per_dag=4)
     def load_batch(batch: dict[str, Any]) -> dict[str, Any]:
+        """Validate and load one pipeline batch, recording success or failure.
+
+        Transaction and label files have different schemas and object layouts,
+        but both must reconcile exactly with their batch quality manifest before
+        data is accepted into ClickHouse.
+        """
+
         _, endpoint_url, access_key, secret_key = get_minio_runtime()
         client = get_clickhouse_client()
         context = get_current_context()

@@ -1,3 +1,15 @@
+"""Build trustworthy, reproducible metadata artifacts for ML pipeline runs.
+
+Flow:
+    1. Hash every input that materially affects the run.
+    2. Verify that the relevant Git paths are committed and unchanged.
+    3. Wrap validation results with provenance and a stable schema version.
+    4. Persist JSON atomically, or immutably when overwriting is forbidden.
+
+The functions in this module deliberately fail closed: incomplete provenance or
+an interrupted write must never look like a valid artifact.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,10 +23,12 @@ from typing import Any
 
 
 class ArtifactError(RuntimeError):
-    """Artifact cannot be proven reproducible or written atomically."""
+    """Raised when an artifact cannot be proven reproducible or written safely."""
 
 
 def sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest of a file without loading it fully into memory."""
+
     digest = hashlib.sha256()
     try:
         with path.open("rb") as stream:
@@ -26,6 +40,8 @@ def sha256_file(path: Path) -> str:
 
 
 def git_output(root: Path, arguments: Sequence[str]) -> str:
+    """Run a read-only Git command and return its trimmed standard output."""
+
     try:
         completed = subprocess.run(
             ["git", *arguments],
@@ -42,6 +58,12 @@ def git_output(root: Path, arguments: Sequence[str]) -> str:
 def collect_git_provenance(
     repository_root: Path, relative_paths: Sequence[Path]
 ) -> dict[str, Any]:
+    """Capture the commit SHA after proving that relevant paths are clean.
+
+    A dirty source or configuration path makes the run ambiguous, so this
+    function raises :class:`ArtifactError` instead of recording weak provenance.
+    """
+
     str_paths = [str(path.relative_to(repository_root)) for path in relative_paths]
     status = git_output(
         repository_root, arguments=["status", "--porcelain", "--", *str_paths]
@@ -64,6 +86,8 @@ def build_artifact(
     dbt_manifest_path: Path,
     relevant_paths: Sequence[Path],
 ) -> dict[str, Any]:
+    """Combine a successful validation report with content and Git provenance."""
+
     git = collect_git_provenance(repository_root, relevant_paths)
     return {
         "artifact_schema_version": 1,
@@ -82,6 +106,12 @@ def build_artifact(
 
 
 def write_json_atomic(destination: Path, payload: Mapping[str, Any]) -> None:
+    """Write complete JSON via a temporary file and an atomic replacement.
+
+    ``fsync`` ensures bytes reach the filesystem before ``os.replace`` exposes
+    the new file, preventing readers from observing a partially written artifact.
+    """
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -106,12 +136,18 @@ def write_json_atomic(destination: Path, payload: Mapping[str, Any]) -> None:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
 
+
 def write_json_immutable(destination: Path, payload: Mapping[str, Any]) -> None:
+    """Write JSON once, rejecting any attempt to overwrite an existing artifact."""
+
     if destination.exists():
         raise ArtifactError(f"refusing to overwrite immutable artifact: {destination}")
     write_json_atomic(destination, payload)
 
+
 def canonical_json_sha256(payload: Mapping[str, Any]) -> str:
+    """Hash a mapping using deterministic JSON ordering and separators."""
+
     encoded = json.dumps(
         payload,
         sort_keys=True,

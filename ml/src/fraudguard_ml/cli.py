@@ -1,3 +1,14 @@
+"""Command-line entry points for validating the FraudGuard ML environment.
+
+Flow:
+    * ``smoke`` loads strict runtime configuration, applies reproducibility
+      settings, inspects available hardware, and prints a readiness report.
+    * ``validate-training-data`` loads the data contract, queries ClickHouse,
+      builds a provenance-rich artifact, and writes it atomically.
+    * ``main`` translates expected domain/configuration failures into concise,
+      credential-safe CLI errors and non-zero exit codes.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -25,6 +36,8 @@ from fraudguard_ml.training_data_contract import (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Define the public CLI commands and their typed arguments."""
+
     parser = argparse.ArgumentParser(prog="fraudguard")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -51,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_validate_training_data(config_path: Path, output_path: Path) -> int:
+    """Validate ClickHouse training data and persist its contract artifact.
+
+    The database client is always closed. The returned report is wrapped by
+    :func:`build_artifact`, which adds ``status``, hashes, and Git provenance.
+    """
+
     config = load_yaml_config(config_path, TrainingDataContractConfig)
     client = create_clickhouse_client(ClickHouseSettings.from_env())
     try:
@@ -75,6 +94,8 @@ def run_validate_training_data(config_path: Path, output_path: Path) -> int:
 
 
 def run_smoke(config_path: Path, json_output: bool) -> int:
+    """Check configuration, deterministic seeding, and local compute resources."""
+
     config = load_yaml_config(config_path, SmokeConfig)
     configure_thread_limits(config.runtime.max_cpu_threads)
     seed_status = seed_everything(config.runtime.random_seed)
@@ -99,6 +120,8 @@ def run_smoke(config_path: Path, json_output: bool) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Dispatch a CLI command and map known failures to exit code 2."""
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

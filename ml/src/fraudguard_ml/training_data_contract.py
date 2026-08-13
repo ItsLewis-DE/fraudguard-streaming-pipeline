@@ -1,3 +1,18 @@
+"""Validate the exact schema and row-level quality of the training-data mart.
+
+Validation flow:
+    1. Parse relation names with an allow-listed identifier grammar so generated
+       SQL cannot contain arbitrary expressions.
+    2. Read the ordered ClickHouse schema and require an exact contract match.
+    3. Run one aggregate query for keys, nulls, domains, derived formulas, and
+       lineage coverage rather than transferring raw rows to Python.
+    4. Convert the single metrics row into typed counters and fail on any breach.
+    5. Return a timestamped report; the artifact layer later adds success status,
+       content hashes, and Git provenance.
+
+Failures are raised as credential-safe domain errors suitable for CLI output.
+"""
+
 from __future__ import annotations
 
 import re
@@ -20,19 +35,28 @@ class DataContractError(RuntimeError):
 
 
 class QueryResult(Protocol):
+    """Minimal query-result interface required from a ClickHouse client."""
+
     column_names: Sequence[str]
     result_rows: Sequence[Sequence[str]]
 
 
 class ClickHouseClient(Protocol):
+    """Structural type accepted by the validator and its test doubles."""
+
     def query(
         self,
         query: str,
         parameters: Mapping[str, Any] | None = None,
-    ) -> QueryResult: ...
+    ) -> QueryResult:
+        """Execute a read query with optional separately bound parameters."""
+
+        ...
 
 
 class FrozenStrictModel(BaseModel):
+    """Immutable, non-coercing base model that rejects unknown contract keys."""
+
     model_config = ConfigDict(
         strict=True,
         frozen=True,
@@ -43,21 +67,29 @@ class FrozenStrictModel(BaseModel):
 # Kiểm tra độ hợp lệ của relation
 @dataclass(frozen=True)
 class RelationName:
+    """A validated ClickHouse ``database.table`` pair safe for SQL quoting."""
+
     database: str
     table: str
 
     @classmethod
     def parse(cls, value: str) -> RelationName:
+        """Parse a qualified relation or raise a credential-safe contract error."""
+
         match = RELATION_PATTERN.fullmatch(value)
         if match is None:
             raise DataContractError("relation must be database.table")
         return cls(**match.groupdict())
 
     def quoted(self) -> str:
+        """Return the relation with both identifiers quoted for ClickHouse SQL."""
+
         return f"`{self.database}`.`{self.table}`"
 
 
 class ExpectedColumn(FrozenStrictModel):
+    """Expected ClickHouse column name, exact type, and nullability contract."""
+
     name: str
     clickhouse_type: str
     nullable: bool = False
@@ -65,12 +97,16 @@ class ExpectedColumn(FrozenStrictModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
+        """Reject names that cannot be safely used as SQL identifiers."""
+
         if IDENTIFIER_PATTERN.fullmatch(value) is None:
             raise ValueError(f"invalid ClickHouse identifier: {value}")
         return value
 
     @model_validator(mode="after")
     def validate_type_nullability(self) -> Self:
+        """Keep the explicit nullable flag consistent with ``Nullable(...)``."""
+
         actual_nullable = self.clickhouse_type.startswith("Nullable(")
         if actual_nullable != self.nullable:
             raise ValueError("nullable must match the Nullable(...) ClickHouse type")
@@ -78,6 +114,8 @@ class ExpectedColumn(FrozenStrictModel):
 
 
 class TrainingDataContractConfig(FrozenStrictModel):
+    """Complete schema, semantics, lineage, and domain rules for training data."""
+
     schema_version: Literal[1]
     dataset_name: Literal["paysim_training_transactions_v1"]
     relation: str
@@ -94,7 +132,6 @@ class TrainingDataContractConfig(FrozenStrictModel):
     expected_columns: tuple[ExpectedColumn, ...]
     prohibited_relation_columns: tuple[str, ...]
     non_feature_columns: tuple[str, ...]
-    audit_candidate_columns: tuple[str, ...]
     transaction_type_domain: tuple[
         Literal["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"],
         ...,
@@ -105,23 +142,25 @@ class TrainingDataContractConfig(FrozenStrictModel):
         "expected_columns",
         "prohibited_relation_columns",
         "non_feature_columns",
-        "audit_candidate_columns",
         "transaction_type_domain",
         mode="before",
     )
     @classmethod
     def freeze_yaml_sequences(cls, value: object) -> object:
+        """Normalize YAML lists to tuples for an immutable validated contract."""
+
         return tuple(value) if isinstance(value, list) else value
 
     @field_validator(
         "primary_key",
         "prohibited_relation_columns",
         "non_feature_columns",
-        "audit_candidate_columns",
         mode="before",
     )
     @classmethod
     def validate_identifier_sequence(cls, value: object) -> object:
+        """Validate every configured column name before it can influence SQL."""
+
         sequence = tuple(value) if isinstance(value, (list, tuple)) else ()
         for item in sequence:
             if not isinstance(item, str):
@@ -133,6 +172,8 @@ class TrainingDataContractConfig(FrozenStrictModel):
     @field_validator("relation", "lineage_relation")
     @classmethod
     def validate_relation(cls, value: str) -> str:
+        """Require relation values in the safe ``database.table`` form."""
+
         if RELATION_PATTERN.fullmatch(value) is None:
             raise ValueError("relation must be database.table")
         return value
@@ -140,6 +181,8 @@ class TrainingDataContractConfig(FrozenStrictModel):
     @field_validator("replay_epoch_utc")
     @classmethod
     def validate_replay_epoch(cls, value: str) -> str:
+        """Require the replay epoch to be an ISO-8601 timestamp in UTC."""
+
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.utcoffset() != UTC.utcoffset(parsed):
             raise ValueError("replay_epoch_utc must be UTC")
@@ -147,14 +190,17 @@ class TrainingDataContractConfig(FrozenStrictModel):
 
     @model_validator(mode="after")
     def validate_column_contract(self) -> Self:
+        """Reconcile column roles and enforce cross-field leakage constraints."""
+
         names = tuple(column.name for column in self.expected_columns)
         expected = set(names)
         primary_key = set(self.primary_key)
         prohibited = set(self.prohibited_relation_columns)
         non_features = set(self.non_feature_columns)
-        audit_candidates = set(self.audit_candidate_columns)
 
         def require_unique(name: str, values: tuple[str, ...]) -> None:
+            """Raise a field-specific error when a configured sequence repeats."""
+
             if len(values) != len(set(values)):
                 raise ValueError(f"{name} contains duplicates")
 
@@ -167,7 +213,6 @@ class TrainingDataContractConfig(FrozenStrictModel):
             self.prohibited_relation_columns,
         )
         require_unique("non_feature_columns", self.non_feature_columns)
-        require_unique("audit_candidate_columns", self.audit_candidate_columns)
         require_unique(
             "transaction_type_domain",
             self.transaction_type_domain,
@@ -179,16 +224,10 @@ class TrainingDataContractConfig(FrozenStrictModel):
             raise ValueError("primary_key must be a subset of expected columns")
         if not non_features <= expected:
             raise ValueError("non_feature_columns must be a subset of expected columns")
-        if not audit_candidates <= expected:
-            raise ValueError(
-                "audit_candidate_columns must be a subset of expected columns"
-            )
         if expected & prohibited:
             raise ValueError("expected and prohibited relation columns overlap")
         if prohibited & non_features:
             raise ValueError("prohibited and non-feature sequences overlap")
-        if non_features & audit_candidates:
-            raise ValueError("non-feature and audit-candidate sequences overlap")
 
         required_structural = {
             self.source_column,
@@ -208,6 +247,8 @@ class TrainingDataContractConfig(FrozenStrictModel):
 
 @dataclass(frozen=True)
 class ContractMetrics:
+    """Aggregate counters produced by the row-level contract query."""
+
     row_count: int
     distinct_key_count: int
     empty_key_count: int
@@ -215,12 +256,13 @@ class ContractMetrics:
     invalid_source_count: int
     invalid_type_count: int
     invalid_target_count: int
-    invalid_formula_count: int
     missing_lineage_count: int
 
 
 @dataclass(frozen=True)
 class ValidationReport:
+    """Successful schema and quality evidence returned by the validator."""
+
     dataset_name: str
     relation: str
     validated_at_utc: str
@@ -232,6 +274,8 @@ def parse_one_metrics_row(
     result: QueryResult,
     expected_columns: tuple[str, ...],
 ) -> tuple[int, ...]:
+    """Validate the aggregate query shape and convert its only row to integers."""
+
     if tuple(result.column_names) != expected_columns:
         raise DataContractError("metrics query returned unexpected columns")
     if len(result.result_rows) != 1:
@@ -244,6 +288,8 @@ def read_exact_schema(
     client: ClickHouseClient,
     relation: RelationName,
 ) -> tuple[tuple[str, str], ...]:
+    """Read ordered column names and exact types from ClickHouse metadata."""
+
     result = client.query(
         """
         select name, type
@@ -267,7 +313,6 @@ METRIC_COLUMNS = (
     "invalid_source_count",
     "invalid_type_count",
     "invalid_target_count",
-    "invalid_formula_count",
     "missing_lineage_count",
 )
 
@@ -278,6 +323,13 @@ def validate_training_data_contract(
     *,
     now_utc: datetime | None = None,
 ) -> ValidationReport:
+    """Validate schema, content domains, uniqueness, and lineage.
+
+    The function returns only after every violation count is zero and at least
+    one row exists. It does not add an artifact ``status`` field; that wrapper is
+    intentionally created later by :func:`fraudguard_ml.artifacts.build_artifact`.
+    """
+
     relation = RelationName.parse(config.relation)  # Kiểm tra relation có hợp lệ k
     lineage = RelationName.parse(config.lineage_relation)
     actual_schema = read_exact_schema(client, relation)
@@ -321,17 +373,6 @@ def validate_training_data_contract(
             ) as invalid_type_count,
             countIf(t.is_fraud not in (0, 1))
                     as invalid_target_count,
-            countIf(
-                origin_balance_delta
-                    != origin_balance_before - origin_balance_after
-                or destination_balance_delta
-                    != destination_balance_after
-                       - destination_balance_before
-                or origin_amount_residual
-                    != abs(origin_balance_delta - amount)
-                or destination_amount_residual
-                    != abs(destination_balance_delta - amount)
-            ) as invalid_formula_count,
             countIf(l.lineage_matched =0) as missing_lineage_count
         from {relation.quoted()} as t 
         left join lineage as l
@@ -352,7 +393,6 @@ def validate_training_data_contract(
         "invalid_source_count": metrics.invalid_source_count,
         "invalid_type_count": metrics.invalid_type_count,
         "invalid_target_count": metrics.invalid_target_count,
-        "invalid_formula_count": metrics.invalid_formula_count,
         "missing_lineage_count": metrics.missing_lineage_count,
     }
     failed = {name: value for name, value in violations.items() if value != 0}

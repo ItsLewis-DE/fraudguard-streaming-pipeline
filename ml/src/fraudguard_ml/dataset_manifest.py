@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Literal, self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 
 class ManifestError(RuntimeError):
     """Snapshot or manifest cannot be trusted for training."""
@@ -73,7 +73,7 @@ class DatasetManifest(FrozenModel):
     split_statistics: SplitStatistics
 
     @model_validator(mode="after")
-    def validate_totals(self) -> "DatasetManifest":
+    def validate_totals(self) -> DatasetManifest:
         partitions = (
             self.split_statistics.train,
             self.split_statistics.validation,
@@ -94,4 +94,5 @@ def load_manifest(path: Path) -> DatasetManifest:
     except (OSError, json.JSONDecodeError) as exc:
         raise ManifestError(f"cannot read dataset manifest: {path}") from exc
     return DatasetManifest.model_validate(payload)
+
 

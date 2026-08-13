@@ -3,13 +3,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from type import Self
-
 import boto3
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
+from type import Self
 
 from fraudguard_ml.artifacts import ArtifactError, sha256_file
+
 
 @dataclass(frozen=True)
 class S3Location:

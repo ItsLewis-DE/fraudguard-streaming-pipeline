@@ -53,6 +53,40 @@ models:
         description: Destination balance immediately before the transaction.
       - name: destination_balance_after
         description: Destination balance after the ledger update; pending M2 leakage audit before feature use.
+      - name: origin_balance_delta
+        description: Signed origin balance decrease, calculated as origin_balance_before minus origin_balance_after.
+        data_tests: [not_null]
+      - name: destination_balance_delta
+        description: Signed destination balance increase, calculated as destination_balance_after minus destination_balance_before.
+        data_tests: [not_null]
+      - name: origin_amount_residual
+        description: Absolute difference between origin_balance_delta and amount.
+        data_tests: [not_null]
+      - name: destination_amount_residual
+        description: Absolute difference between destination_balance_delta and amount.
+        data_tests: [not_null]
+      - name: origin_balance_before_is_zero
+        description: UInt8 flag equal to 1 when origin_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_before_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_after_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_after is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
       - name: is_fraud
         description: Final synthetic target for offline use; unmatched-label rows may carry join defaults.
         data_tests:
@@ -143,6 +177,40 @@ models:
         description: Destination balance immediately before the transaction.
       - name: destination_balance_after
         description: Post-ledger destination balance; pending M2 leakage audit before feature use.
+      - name: origin_balance_delta
+        description: Signed origin balance decrease, calculated as origin_balance_before minus origin_balance_after.
+        data_tests: [not_null]
+      - name: destination_balance_delta
+        description: Signed destination balance increase, calculated as destination_balance_after minus destination_balance_before.
+        data_tests: [not_null]
+      - name: origin_amount_residual
+        description: Absolute difference between origin_balance_delta and amount.
+        data_tests: [not_null]
+      - name: destination_amount_residual
+        description: Absolute difference between destination_balance_delta and amount.
+        data_tests: [not_null]
+      - name: origin_balance_before_is_zero
+        description: UInt8 flag equal to 1 when origin_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_before_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_after_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_after is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
       - name: is_fraud
         description: Final synthetic PaySim target for supervised training; never an inference feature.
         data_tests:

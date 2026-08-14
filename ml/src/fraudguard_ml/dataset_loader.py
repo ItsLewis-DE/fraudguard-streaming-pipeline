@@ -73,3 +73,70 @@ def materialize_snapshot(
         destination.unlink(missing_ok=True)
         raise ManifestError("downloaded snapshot size does not match manifest")
     return destination
+
+def read_one_split(
+    *,
+    snapshot_path: Path,
+    config: ExperimentConfig,
+    filters: list[tuple[str, str, Any]],
+) -> FrameSplit:
+    columns = list(
+        dict.fromkeys(
+            (
+                *config.dataset.id_columns,
+                "event_time",
+                *config.dataset.feature_columns,
+                config.dataset.target_column,
+            )
+        )
+    )
+    table = pq.read_table(snapshot_path, columns=columns, filters=filters)
+    #filter ở đây sẽ giúp lọc dữ liệu ngay khi đọc file
+    frame = table.to_pandas()
+    if frame.empty:
+        raise ManifestError("temporal split is empty")
+    target = frame.pop(config.dataset.target_column).astype("uint8")
+    keys = frame.loc[:, list(config.dataset.id_columns)].copy()
+    event_time = pd.to_datetime(frame.pop("event_time"), utc=True)
+    features = frame.loc[:, list(config.dataset.feature_columns)].copy()
+    return FrameSplit(
+        features=features,
+        target=target,
+        keys=keys,
+        event_time=event_time,
+    )
+
+
+def load_dataset_splits(
+    *,
+    snapshot_path: Path,
+    manifest: DatasetManifest,
+    config: ExperimentConfig,
+) -> DatasetSplits:
+    verify_manifest_config(manifest, config)
+    train_end = parse_utc(manifest.split.train_end)
+    validation_end = parse_utc(manifest.split.validation_end)
+    test_end = parse_utc(manifest.split.test_end)
+    train = read_one_split(
+        snapshot_path=snapshot_path,
+        config=config,
+        filters=[("event_time", "<=", train_end)],
+    )
+    validation = read_one_split(
+        snapshot_path=snapshot_path,
+        config=config,
+        filters=[
+            ("event_time", ">", train_end),
+            ("event_time", "<=", validation_end),
+        ],
+    )
+    test = read_one_split(
+        snapshot_path=snapshot_path,
+        config=config,
+        filters=[
+            ("event_time", ">", validation_end),
+            ("event_time", "<=", test_end),
+        ],
+    )
+    splits = DatasetSplits(train=train, validation=validation, test=test)
+    return splits

@@ -35,6 +35,9 @@ expected_columns:
   - {name: destination_balance_delta, clickhouse_type: "Decimal(18, 2)"}
   - {name: origin_amount_residual, clickhouse_type: "Decimal(18, 2)"}
   - {name: destination_amount_residual, clickhouse_type: "Decimal(18, 2)"}
+  - {name: origin_balance_before_is_zero, clickhouse_type: UInt8}
+  - {name: destination_balance_before_is_zero, clickhouse_type: UInt8}
+  - {name: destination_balance_after_is_zero, clickhouse_type: UInt8}
   - {name: is_fraud, clickhouse_type: UInt8}
 
 prohibited_relation_columns:

@@ -2,7 +2,7 @@ parameter,value
 data_path,/home/phongthanh/ML_Fraud_Banking/data/data.csv
 file_size_mb,470.67144680023193
 csv_sha256,16910f90577b0d981bf8ff289714510bb89bc71bff7d3f220f024e287e4eea6b
-git_commit,18f76a4
+git_commit,2fccf2b
 python_version,3.12.3
 pandas_version,3.0.5
 matplotlib_version,3.11.1

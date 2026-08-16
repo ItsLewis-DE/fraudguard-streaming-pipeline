@@ -1,12 +1,3 @@
-# Phase 4 — Training, threshold selection và final evaluation
-
-Phase này dùng train/validation để tạo model bundle. Test được evaluate bằng command riêng sau khi bundle đã khóa threshold.
-
-## 1. Training implementation
-
-Tạo `ml/src/fraudguard_ml/training.py`:
-
-```python
 from __future__ import annotations
 
 import os
@@ -38,10 +29,8 @@ from fraudguard_ml.dataset_loader import DatasetSplits
 from fraudguard_ml.dataset_manifest import DatasetManifest
 from fraudguard_ml.experiment_config import ExperimentConfig
 
-
 class TrainingError(RuntimeError):
     """Model training cannot produce a trustworthy artifact."""
-
 
 
 def feature_groups(config: ExperimentConfig) -> tuple[list[str], list[str]]:
@@ -54,7 +43,6 @@ def feature_groups(config: ExperimentConfig) -> tuple[list[str], list[str]]:
         column for column in config.dataset.feature_columns if column not in categorical
     ]
     return categorical, numeric
-
 
 def normalize_feature_types(
     frame: pd.DataFrame,
@@ -69,7 +57,6 @@ def normalize_feature_types(
             "float64"
         )
     return normalized
-
 
 def build_pipeline(config: ExperimentConfig) -> Pipeline:
     categorical, numeric = feature_groups(config)
@@ -112,7 +99,6 @@ def build_pipeline(config: ExperimentConfig) -> Pipeline:
         ]
     )
 
-
 def select_threshold(
     target: pd.Series,
     probability: NDArray[np.float64],
@@ -122,10 +108,11 @@ def select_threshold(
     precision, recall, thresholds = precision_recall_curve(target, probability)
     if len(thresholds) == 0:
         raise TrainingError("validation probabilities cannot produce a threshold")
-    candidate_indices = np.flatnonzero(precision[:-1] >= min_precision)
+    candidate_indices = np.flatnonzero(precision[:-1] >= min_precision) 
+    #hàm flatnonzero dùng để lấy index
     if len(candidate_indices):
         candidate_recalls = recall[:-1][candidate_indices]
-        index = int(candidate_indices[np.argmax(candidate_recalls)])
+        index = int(candidate_indices[np.argmax(candidate_recalls)]) #Trả ra index có gt lớn nhất
         reason = "max_recall_at_min_precision"
     else:
         denominator = precision[:-1] + recall[:-1]
@@ -142,7 +129,6 @@ def select_threshold(
         "validation_precision": float(precision[index]),
         "validation_recall": float(recall[index]),
     }
-
 
 def binary_metrics(
     target: pd.Series,
@@ -167,7 +153,6 @@ def binary_metrics(
         "alert_rate": float(prediction.mean()),
         "fraud_capture_rate": float(tp / (tp + fn)) if tp + fn else 0.0,
     }
-
 
 def write_joblib_immutable(destination: Path, payload: dict[str, Any]) -> None:
     if destination.exists():
@@ -247,115 +232,3 @@ def train_and_select_threshold(
         "validation_metrics_path": str(metrics_path),
         "threshold": threshold,
     }
-```
-
-Không load `joblib` từ nguồn không tin cậy; pickle/joblib có thể thực thi code khi deserialize.
-
-## 2. Final evaluation
-
-Tạo `ml/src/fraudguard_ml/evaluation.py`:
-
-```python
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
-
-import joblib
-
-from fraudguard_ml.artifacts import sha256_file, write_json_immutable
-from fraudguard_ml.dataset_loader import FrameSplit
-from fraudguard_ml.dataset_manifest import DatasetManifest, ManifestError
-from fraudguard_ml.experiment_config import ExperimentConfig
-from fraudguard_ml.training import binary_metrics, normalize_feature_types
-
-
-def evaluate_test_split(
-    *,
-    test: FrameSplit,
-    config: ExperimentConfig,
-    manifest: DatasetManifest,
-    manifest_path: Path,
-    model_path: Path,
-    output_path: Path,
-) -> dict[str, Any]:
-    bundle = joblib.load(model_path)
-    manifest_sha256 = sha256_file(manifest_path)
-    if bundle.get("dataset_manifest_sha256") != manifest_sha256:
-        raise ManifestError("model and evaluation manifest do not match")
-    if tuple(bundle.get("feature_list", ())) != config.dataset.feature_columns:
-        raise ManifestError("model feature order does not match config")
-    if bundle.get("population_fingerprint") != manifest.population_fingerprint:
-        raise ManifestError("model population fingerprint does not match manifest")
-    features = normalize_feature_types(test.features, config)
-    probability = bundle["pipeline"].predict_proba(features)[:, 1]
-    metrics = binary_metrics(test.target, probability, float(bundle["threshold"]))
-    result = {
-        "evaluation_schema_version": 1,
-        "experiment_name": config.experiment_name,
-        "run_id": manifest.run_id,
-        "split": "test",
-        "metrics": metrics,
-        "model_sha256": sha256_file(model_path),
-        "dataset_manifest_sha256": manifest_sha256,
-        "snapshot_sha256": manifest.snapshot_sha256,
-        "population_fingerprint": manifest.population_fingerprint,
-        "label_policy": manifest.label_policy,
-    }
-    write_json_immutable(output_path, result)
-    return result
-```
-
-Không gọi `select_threshold` trong `evaluation.py`. Threshold đã được khóa trong bundle.
-
-## 3. Feature policy theo dự án
-
-Baseline dùng các feature trước/sẵn tại prediction point:
-
-```text
-transaction_type
-amount
-origin_balance_before
-destination_balance_before
-```
-
-Challenger hiện thêm after-balance/delta/residual. Vì prediction point là `post_ledger_update`, chúng có thể được thử nghiệm, nhưng report phải ghi rõ model chỉ áp dụng sau chốt sổ. Không được tái sử dụng bundle này cho pre-transaction authorization.
-
-`step` là split/audit column và nằm trong forbidden feature list; không thêm vào estimator dù EDA có phân tích `step`.
-
-## 4. So sánh baseline/challenger
-
-Một comparison record nên lưu:
-
-```json
-{
-  "baseline_run_id": "...",
-  "challenger_run_id": "...",
-  "same_population": true,
-  "population_fingerprint": "xor64:...",
-  "same_boundaries": true,
-  "same_label_policy": true,
-  "feature_change_is_intentional": true
-}
-```
-
-Không yêu cầu manifest SHA giống nhau khi snapshot chứa feature list khác. Bắt buộc population fingerprint, row/fraud counts, boundaries và label policy giống nhau. Phương án tốt hơn là reuse một canonical snapshot có union feature columns cho cả hai run.
-
-## 5. Tests phase 4
-
-- Preprocessor chỉ fit train; unseen validation category không làm crash.
-- `feature_list` order được bảo toàn.
-- Threshold thỏa min precision khi có candidate.
-- Không có candidate thì fallback max-F1 và ghi rõ reason.
-- Model bundle ghi immutable, có manifest SHA/population fingerprint.
-- Evaluation reject bundle từ manifest khác.
-- Test evaluation không gọi threshold selector.
-- Cùng snapshot/config/seed cho metric trong tolerance.
-- `is_fraud`, ID, `event_time`, `step` không xuất hiện trong transformed feature inputs.
-
-## Acceptance phase 4
-
-- Train command không query ClickHouse.
-- Test chưa được đụng tới trong training/threshold selection.
-- Bundle đủ để inference lại với đúng feature order.
-- Evaluation JSON truy ngược được model, manifest và snapshot.

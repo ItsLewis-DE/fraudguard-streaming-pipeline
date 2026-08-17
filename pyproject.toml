@@ -9,13 +9,19 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "boto3>=1.40,<2",
     "clickhouse-connect>=1.5.0",
     "confluent-kafka[avro]>=2.15.0",
-    "pandas>=3.0.5",
+    "joblib>=1.5,<2",
+    "numpy>=2.3,<3",
+    "pandas>=3.0.5,<4",
     "psutil>=7,<8",
+    "pyarrow>=21,<22",
     "pydantic>=2.12,<3",
     "pyyaml>=6,<7",
-    "seaborn>=0.13.2",
+    "scikit-learn>=1.7,<2",
+    "scipy>=1.16,<2",
+    "seaborn>=0.13.2,<1",
 ]
 
 [project.scripts]

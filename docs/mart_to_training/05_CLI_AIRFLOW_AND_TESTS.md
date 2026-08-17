@@ -122,7 +122,6 @@ def run_snapshot_training_dataset(args: argparse.Namespace) -> int:
             config=config,
             config_path=args.config,
             contract_artifact_path=args.contract_artifact,
-            dbt_manifest_path=args.dbt_manifest,
             repository_root=args.repository_root,
             run_id=args.run_id,
             output_dir=args.output,

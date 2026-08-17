@@ -9,6 +9,16 @@ models:
       are present only for offline training-readiness evaluation and are not
       inference inputs. Because PaySim is synthetic, this model cannot establish
       production performance on real banking data.
+    meta:
+      owner: phongthanh
+      purpose: "Candidate population with deterministic training eligibility and exclusion reasons."
+      data_classification: restricted_training
+      freshness_slo:
+        warn_after_minutes: 30
+        error_after_minutes: 60
+        basis: "Training candidates are refreshed by the scheduled dbt build, not per-event inference."
+      quality_slo:
+        required_checks: [business_key_not_null, eligibility_partition_reconciles, exclusion_reason_not_null]
     columns:
       - name: source
         description: Synthetic-data source namespace; a structural key and not an approved feature.
@@ -44,13 +54,39 @@ models:
       - name: destination_balance_after
         description: Destination balance after the ledger update; pending M2 leakage audit before feature use.
       - name: origin_balance_delta
-        description: Origin before-minus-after balance delta; audit candidate pending M2 leakage review.
+        description: Signed origin balance decrease, calculated as origin_balance_before minus origin_balance_after.
+        data_tests: [not_null]
       - name: destination_balance_delta
-        description: Destination after-minus-before balance delta; audit candidate pending M2 leakage review.
+        description: Signed destination balance increase, calculated as destination_balance_after minus destination_balance_before.
+        data_tests: [not_null]
       - name: origin_amount_residual
-        description: Absolute difference between the origin balance delta and amount; pending M2 leakage review.
+        description: Absolute difference between origin_balance_delta and amount.
+        data_tests: [not_null]
       - name: destination_amount_residual
-        description: Absolute difference between the destination balance delta and amount; pending M2 leakage review.
+        description: Absolute difference between destination_balance_delta and amount.
+        data_tests: [not_null]
+      - name: origin_balance_before_is_zero
+        description: UInt8 flag equal to 1 when origin_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_before_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_after_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_after is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
       - name: is_fraud
         description: Final synthetic target for offline use; unmatched-label rows may carry join defaults.
         data_tests:
@@ -97,6 +133,16 @@ models:
       After-balance, delta, and residual columns remain audit candidates pending
       M2 leakage analysis; this model does not define a final feature allowlist
       or support claims about production banking performance.
+    meta:
+      owner: phongthanh
+      purpose: "Eligible offline training relation for reproducible fraud-model experiments."
+      data_classification: restricted_training
+      freshness_slo:
+        warn_after_minutes: 30
+        error_after_minutes: 60
+        basis: "Training data is refreshed by the scheduled dbt build and consumed offline."
+      quality_slo:
+        required_checks: [business_key_not_null, target_domain, feature_allowlist_review]
     columns:
       - name: source
         description: Synthetic-data source namespace; structural key, not a feature.
@@ -132,13 +178,39 @@ models:
       - name: destination_balance_after
         description: Post-ledger destination balance; pending M2 leakage audit before feature use.
       - name: origin_balance_delta
-        description: Origin before-minus-after balance delta; pending M2 leakage audit.
+        description: Signed origin balance decrease, calculated as origin_balance_before minus origin_balance_after.
+        data_tests: [not_null]
       - name: destination_balance_delta
-        description: Destination after-minus-before balance delta; pending M2 leakage audit.
+        description: Signed destination balance increase, calculated as destination_balance_after minus destination_balance_before.
+        data_tests: [not_null]
       - name: origin_amount_residual
-        description: Origin balance-delta residual against amount; pending M2 leakage audit.
+        description: Absolute difference between origin_balance_delta and amount.
+        data_tests: [not_null]
       - name: destination_amount_residual
-        description: Destination balance-delta residual against amount; pending M2 leakage audit.
+        description: Absolute difference between destination_balance_delta and amount.
+        data_tests: [not_null]
+      - name: origin_balance_before_is_zero
+        description: UInt8 flag equal to 1 when origin_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_before_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_before is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: destination_balance_after_is_zero
+        description: UInt8 flag equal to 1 when destination_balance_after is zero, otherwise 0.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
       - name: is_fraud
         description: Final synthetic PaySim target for supervised training; never an inference feature.
         data_tests:
@@ -153,6 +225,18 @@ models:
       observed training_exclusion_reason. row_count supports reconciliation of
       eligible and excluded candidates; absence of a reason means no row for
       that reason rather than an implicit zero-filled record.
+    meta:
+      owner: phongthanh
+      purpose: "Audit summary used to reconcile why candidate rows are excluded from training."
+      data_classification: restricted_training
+      freshness_slo:
+        warn_after_minutes: 30
+        error_after_minutes: 60
+        basis: "Updated with the training-candidate relation."
+      quality_slo:
+        required_checks: [exclusion_reason_domain, row_count_not_null]
+        reconciliation_error_count: 0
+        invalid_record_action: block_training
     columns:
       - name: training_exclusion_reason
         description: Candidate eligibility category represented by this summary row.

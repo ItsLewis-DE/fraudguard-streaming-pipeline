@@ -1,3 +1,15 @@
+"""Configure the fraud-label Kafka-to-MinIO Spark landing job.
+
+Flow:
+    1. Resolve label-specific Kafka, Schema Registry, MinIO, and checkpoint paths.
+    2. Validate decoded fraud flags against their binary domains.
+    3. Delegate shared Confluent framing, schema evolution, quarantine, quality,
+       and Parquet writing behavior to :func:`run_landing`.
+
+Labels do not carry the business timestamp used by transaction partitioning, so
+this pipeline explicitly disables event-date partition derivation.
+"""
+
 import os
 
 from kafka_minio_landing import LandingConfig, run_landing
@@ -6,6 +18,12 @@ from pyspark.sql.functions import lit, when
 
 
 def label_validation_reason(record: Column) -> Column:
+    """Return the first label-domain violation as a Spark column expression.
+
+    A null reason means the decoded label is valid; otherwise the stable reason
+    code determines its quarantine partition and operational diagnostics.
+    """
+
     return (
         when(
             record["event_id"].isNull(),
@@ -24,6 +42,8 @@ def label_validation_reason(record: Column) -> Column:
 
 
 def main() -> None:
+    """Build label landing configuration from the environment and start the job."""
+
     kafka_topic = os.getenv(
         "LABEL_KAFKA_TOPIC",
         "fraud.transaction.label",

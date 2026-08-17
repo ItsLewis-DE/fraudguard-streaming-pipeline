@@ -1,0 +1,3 @@
+sample,rows,fraud_count,fraud_rate,population_rate_valid
+natural_sample,200000,241,0.001205,True
+diagnostic_sample,50546,8213,0.1624856566296047,False

@@ -1,0 +1,8 @@
+metric,value
+rows,6362620.0
+columns,11.0
+min_step,1.0
+max_step,743.0
+fraud_count,8213.0
+fraud_rate,0.001290820448180152
+flagged_fraud_count,16.0

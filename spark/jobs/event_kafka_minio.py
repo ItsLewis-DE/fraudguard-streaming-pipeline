@@ -1,3 +1,16 @@
+"""Configure the transaction-events Kafka-to-MinIO Spark landing job.
+
+Flow:
+    1. Read transaction topic, schema, storage, and checkpoint locations from
+       environment variables with container-friendly defaults.
+    2. Apply transaction-specific validation rules in deterministic priority order.
+    3. Delegate Kafka decoding, quarantine routing, quality reconciliation, and
+       Parquet publication to the shared :func:`run_landing` implementation.
+
+This file intentionally contains only transaction-domain policy; streaming
+infrastructure remains centralized in ``kafka_minio_landing.py``.
+"""
+
 import os
 
 from kafka_minio_landing import LandingConfig, run_landing
@@ -6,6 +19,13 @@ from pyspark.sql.functions import lit, when
 
 
 def transaction_validation_reason(record: Column) -> Column:
+    """Return the first transaction validation failure as a Spark expression.
+
+    A null result marks the decoded record as valid. The ordered ``when`` chain
+    gives malformed Avro, missing timestamps, temporal inconsistency, and invalid
+    step values stable quarantine reason codes.
+    """
+
     return (
         when(
             record["event_id"].isNull(),
@@ -32,6 +52,8 @@ def transaction_validation_reason(record: Column) -> Column:
 
 
 def main() -> None:
+    """Build transaction landing configuration from the environment and run it."""
+
     kafka_topic = os.getenv("KAFKA_TOPIC", "fraud.transaction")
     run_landing(
         LandingConfig(

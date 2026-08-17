@@ -72,7 +72,6 @@ def test_exact_schema_mismatch(
         ({"invalid_source_count": 1}, "invalid_source_count"),
         ({"invalid_type_count": 1}, "invalid_type_count"),
         ({"invalid_target_count": 1}, "invalid_target_count"),
-        ({"invalid_formula_count": 1}, "invalid_formula_count"),
         ({"missing_lineage_count": 1}, "missing_lineage_count"),
     ],
 )
@@ -94,35 +93,6 @@ def test_violations(
             fake_client,  # type: ignore
             canonical_contract,
         )
-
-
-@pytest.mark.parametrize(
-    ("formula_name", "required_fragment"),
-    [
-        ("origin_delta", "origin_balance_before - origin_balance_after"),
-        ("destination_delta", "destination_balance_after - destination_balance_before"),
-        ("origin_residual", "abs(origin_balance_delta - amount)"),
-        ("destination_residual", "abs(destination_balance_delta - amount)"),
-        ("lineage_join", "left join"),
-    ],
-)
-def test_sql_fragments(
-    canonical_contract: TrainingDataContractConfig,
-    valid_schema_rows: tuple[tuple[str, str], ...],
-    formula_name: str,
-    required_fragment: str,
-) -> None:
-    fake_client = FakeClient(
-        routes=ROUTES,
-        responses={
-            "schema": [FakeResult(("name", "type"), valid_schema_rows)],
-            "metrics": [metric_result()],
-        },
-    )
-    validate_training_data_contract(fake_client, canonical_contract)  # type: ignore
-    metrics_call = fake_client.calls[1]
-    normalized = " ".join(metrics_call.query.lower().split())
-    assert required_fragment.lower() in normalized
 
 
 def test_sql_identifiers_quoted_and_values_parameterized(

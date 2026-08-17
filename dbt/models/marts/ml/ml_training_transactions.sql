@@ -14,6 +14,9 @@ select
     destination_balance_delta,
     origin_amount_residual,
     destination_amount_residual,
+    origin_balance_before_is_zero,
+    destination_balance_before_is_zero,
+    destination_balance_after_is_zero,
     is_fraud
 from {{ ref('ml_training_candidates') }}
 where is_training_eligible

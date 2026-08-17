@@ -1,0 +1,4 @@
+check,violation_count,status
+invalid_type,0,PASS
+invalid_isFraud,0,PASS
+invalid_isFlaggedFraud,0,PASS

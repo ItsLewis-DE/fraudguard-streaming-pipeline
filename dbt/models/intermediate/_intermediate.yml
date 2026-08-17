@@ -3,6 +3,17 @@ version: 2
 models:
   - name: int_committed_ingestion_batches
     description: One monotonic commit marker per (pipeline, batch_id).
+    meta:
+      owner: phongthanh
+      purpose: "Selects committed ingestion batches safe for downstream canonical models."
+      data_classification: internal_operational
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the one-minute ingestion and five-minute dbt schedules."
+      quality_slo:
+        required_checks: [batch_identity_not_null, committed_at_not_null]
+        invalid_record_action: block_downstream
     columns:
       - name: pipeline
         data_tests: [not_null]
@@ -15,6 +26,28 @@ models:
 
   - name: int_transactions_ranked
     description: Physical committed transaction rows with canonical rank.
+    meta:
+      owner: phongthanh
+      purpose: "Ranks replayed transaction payloads so one canonical row can be selected per business key."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the dbt build schedule."
+      quality_slo:
+        required_checks: [business_key_not_null, deterministic_rank]
+        invalid_record_action: block_downstream
 
   - name: int_transaction_labels_ranked
     description: Physical committed label rows with deterministic rank.
+    meta:
+      owner: phongthanh
+      purpose: "Ranks replayed label payloads so one canonical final label can be joined offline."
+      data_classification: internal_synthetic
+      freshness_slo:
+        warn_after_minutes: 15
+        error_after_minutes: 30
+        basis: "Expected to follow the dbt build schedule."
+      quality_slo:
+        required_checks: [business_key_not_null, binary_label_domain, deterministic_rank]
+        invalid_record_action: block_downstream

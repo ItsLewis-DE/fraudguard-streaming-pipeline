@@ -10,15 +10,6 @@ select
     origin_balance_after,
     destination_balance_before,
     destination_balance_after,
-    origin_balance_before - origin_balance_after as origin_balance_delta,
-    destination_balance_after - destination_balance_before
-        as destination_balance_delta,
-    abs(
-        (origin_balance_before - origin_balance_after) - amount
-    ) as origin_amount_residual,
-    abs(
-        (destination_balance_after - destination_balance_before) - amount
-    ) as destination_amount_residual,
     is_fraud,
     has_final_label,
     has_payload_conflict,
@@ -39,5 +30,16 @@ select
         has_invalid_amount, 'invalid_amount',
         has_invalid_balance, 'invalid_balance',
         'eligible'
-    ) as training_exclusion_reason
+    ) as training_exclusion_reason,
+    origin_balance_before - origin_balance_after as origin_balance_delta,
+    destination_balance_after - destination_balance_before as destination_balance_delta,
+    abs(
+        (origin_balance_before - origin_balance_after) - amount
+    ) as origin_amount_residual,
+    abs(
+        (destination_balance_after - destination_balance_before) - amount
+    ) as destination_amount_residual,
+    origin_balance_before = 0 as origin_balance_before_is_zero,
+    destination_balance_before = 0 as destination_balance_before_is_zero,
+    destination_balance_after = 0 as destination_balance_after_is_zero
 from {{ ref('fct_transactions_labeled') }}

@@ -236,3 +236,4 @@ def test_loaded_config_is_immutable(
         location=(field_name,),
         error_type="frozen_instance",
     )
+

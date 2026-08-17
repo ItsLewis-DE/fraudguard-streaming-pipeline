@@ -27,4 +27,5 @@ htmlcov/
 *.egg-info/
 
 AGENTS.md
-docs
+/docs/*
+

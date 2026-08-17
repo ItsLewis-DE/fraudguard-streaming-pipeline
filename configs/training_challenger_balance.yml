@@ -3,7 +3,7 @@ experiment_name: fraudguard_balance_challenger
 
 dataset:
   relation: fraudguard_ml.ml_training_transactions
-  prediction_point: post_transaction_event
+  prediction_point: post_ledger_update
   id_columns: [source, event_id]
   split_columns: [event_time, event_date, step]
   feature_columns:
@@ -17,6 +17,9 @@ dataset:
     - destination_balance_delta
     - origin_amount_residual
     - destination_amount_residual
+    - origin_balance_before_is_zero
+    - destination_balance_before_is_zero
+    - destination_balance_after_is_zero
   target_column: is_fraud
   forbidden_feature_columns:
     - source
@@ -34,6 +37,23 @@ split:
   train_end: "2026-01-21T20:00:00Z"
   validation_end: "2026-01-26T20:00:00Z"
   test_end: "2026-01-31T23:00:00Z"
+
+snapshot:
+  storage_uri: s3://fraud-training-snapshots
+  format: parquet
+  compression: zstd
+  fingerprint_algorithm: clickhouse_cityhash64_xor_v1
+  label_policy: static_final_labels
+
+model:
+  kind: logistic_regression
+  class_weight: balanced
+  regularization_c: 1.0
+  max_iter: 500
+
+evaluation:
+  threshold_strategy: max_recall_at_min_precision
+  min_precision: 0.10
 
 runtime:
   random_seed: 42

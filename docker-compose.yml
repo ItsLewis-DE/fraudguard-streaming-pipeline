@@ -25,12 +25,27 @@ x-airflow-common: &airflow-common
       {"conn_type":"aws","login":"${MINIO_AIRFLOW_USER:-fraudguard}","password":"${MINIO_AIRFLOW_PASSWORD:-fraudguard-secret}","extra":{"endpoint_url":"http://minio:9000","region_name":"us-east-1","config_kwargs":{"s3":{"addressing_style":"path"}}}}
     AIRFLOW_CONFIG: /opt/airflow/config/airflow.cfg
     PYTHONDONTWRITEBYTECODE: "1"
+
+    DBT_CLICKHOUSE_HOST: clickhouse
+    DBT_CLICKHOUSE_PORT: "8123"
+    DBT_CLICKHOUSE_DATABASE: fraudguard
+    DBT_CLICKHOUSE_USER: fraudguard_transformer
+    DBT_CLICKHOUSE_PASSWORD: ${DBT_CLICKHOUSE_PASSWORD:?DBT_CLICKHOUSE_PASSWORD must be set}
+    DBT_CLICKHOUSE_THREADS: "2"
+
+    DBT_TARGET_PATH: /opt/airflow/logs/dbt/target
+    DBT_LOG_PATH: /opt/airflow/logs/dbt/logs
+
   user: "${AIRFLOW_UID:-50000}:0"
   volumes:
     - ./airflow/dags:/opt/airflow/dags:ro
     - ./airflow/plugins:/opt/airflow/plugins:ro
     - airflow_logs:/opt/airflow/logs
     - airflow_config:/opt/airflow/config
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/plugins:/opt/airflow/plugins:ro
+    - ./dbt:/opt/airflow/dbt:ro
+    - airflow_logs:/opt/airflow/logs
   depends_on: &airflow-common-depends-on
     airflow-postgres:
       condition: service_healthy

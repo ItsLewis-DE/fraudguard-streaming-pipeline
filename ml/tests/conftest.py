@@ -57,7 +57,7 @@ ROUTES = (
     QueryRoute("schema", lambda sql: "from system.columns" in sql),
     QueryRoute(
         "metrics",
-        lambda sql: "as row_count" in sql and "as invalid_formula_count" in sql,
+        lambda sql: "as row_count" in sql and "as missing_lineage_count" in sql,
     ),
 )
 

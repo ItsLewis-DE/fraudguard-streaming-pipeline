@@ -147,7 +147,7 @@ def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
         payload, sort_keys=True, separators=(",", ":")
     ).encode()  # encode chuyển string
     # thành bytes
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(encoded).hexdigest() #Chỉ nhận bytes
 
 
 def validate_contract_artifact(path: Path, expected_relation: str) -> None:
@@ -213,6 +213,7 @@ def stream_snapshot(
                 if block.num_rows == 0:
                     continue
                 event_time = pd.to_datetime(block["event_time"].to_pandas(), utc=True)
+                #Vì chỉ lấy 1 cột nên khi to_pandas sẽ chuyển qua series
                 target = (
                     block[config.dataset.target_column]
                     .to_numpy(zero_copy_only=False)
@@ -220,6 +221,7 @@ def stream_snapshot(
                 )
                 total.update(event_time, target)
                 update_split_stats(split, event_time, target, config)
+                #Tạo một mã x_or cho từng chunk, cộng dồn lại với nhau
                 for value in block[HELPER_HASH_COLUMN].to_pylist():
                     population_xor ^= int(value)
                 output_block = block.drop([HELPER_HASH_COLUMN])
@@ -346,7 +348,7 @@ def create_snapshot_and_manifest(
         config.snapshot.storage_uri,
         config.experiment_name,
         run_id,
-        "training_data_contract.json",
+        "artifact.json",
     )
     upload_file_immutable(s3_client, contract_artifact_path, contract_uri)
     return manifest

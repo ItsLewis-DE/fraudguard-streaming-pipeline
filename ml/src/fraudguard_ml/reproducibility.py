@@ -42,13 +42,4 @@ def seed_everything(seed: int) -> dict[str, Any]:
     else:
         seeded["numpy"] = False
 
-    if importlib.util.find_spec("torch") is not None:
-        torch = importlib.import_module("torch")
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-        seeded["torch"] = True
-    else:
-        seeded["torch"] = False
-
     return seeded

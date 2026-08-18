@@ -33,7 +33,10 @@ RELATION_PATTERN = re.compile(
 class DataContractError(RuntimeError):
     """A safe, user-facing contract failure without credentials or SQL."""
 
-
+"""
+Protocol là để có một lớp có hàm giống lớp gốc
+thì nó là lớp gốc k yêu cầu phải kế thừa trực tiếp
+"""
 class QueryResult(Protocol):
     """Minimal query-result interface required from a ClickHouse client."""
 
@@ -270,6 +273,7 @@ class ValidationReport:
     metrics: ContractMetrics
 
 
+#Kiểm tra kết quả trả về của metrics có hợp lệ k
 def parse_one_metrics_row(
     result: QueryResult,
     expected_columns: tuple[str, ...],

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
 import clickhouse_connect
 
@@ -30,7 +30,7 @@ class ClickHouseSettings:
     password: str = field(repr=False)
 
     @classmethod
-    def from_env(cls) -> ClickHouseSettings:
+    def from_env(cls) -> Self:
         """Load settings from the environment and reject unsafe values."""
 
         password = os.getenv("CLICKHOUSE_ML_PASSWORD")

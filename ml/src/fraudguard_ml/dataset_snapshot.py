@@ -29,11 +29,7 @@ import pyarrow.parquet as pq
 from botocore.client import BaseClient
 from numpy.typing import NDArray
 
-from fraudguard_ml.artifacts import (
-    git_output,
-    sha256_file,
-    write_json_immutable,
-)
+from fraudguard_ml.artifacts import git_output, sha256_file
 from fraudguard_ml.dataset_manifest import (
     DatasetManifest,
     PartitionStatistics,
@@ -41,6 +37,7 @@ from fraudguard_ml.dataset_manifest import (
     SplitStatistics,
 )
 from fraudguard_ml.experiment_config import ExperimentConfig, parse_utc
+from fraudguard_ml.io_utils import write_json_immutable
 from fraudguard_ml.object_storage import upload_file_immutable
 from fraudguard_ml.training_data_contract import DataContractError, RelationName
 

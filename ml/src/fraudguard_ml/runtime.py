@@ -10,11 +10,9 @@ partially installed CUDA stack.
 
 from __future__ import annotations
 
-import importlib
 import os
 import platform
 import sys
-from typing import Any
 
 import psutil
 from pydantic import BaseModel, ConfigDict

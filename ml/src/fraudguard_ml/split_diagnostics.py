@@ -9,8 +9,8 @@ import pandas as pd
 from scipy.stats import ks_2samp # được dùng để kiểm tra phân phối của
 #2 feature có giống nhau k
 
-from fraudguard_ml.artifacts import write_json_immutable
 from fraudguard_ml.dataset_loader import DatasetSplits, FrameSplit
+from fraudguard_ml.io_utils import write_json_immutable
 
 EPSILON = 1e-6
 
@@ -122,4 +122,3 @@ def build_split_diagnostics(
 
 def write_diagnostics(path: Path, report: dict[str, Any]) -> None:
     write_json_immutable(path, report)
-    

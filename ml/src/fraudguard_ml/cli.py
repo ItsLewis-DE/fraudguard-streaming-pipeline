@@ -21,14 +21,11 @@ from typing import Any
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from pydantic import ValidationError
 
-from fraudguard_ml.artifacts import (
-    ArtifactError,
-    build_artifact,
-    write_json_immutable,
-)
+from fraudguard_ml.artifacts import ArtifactError, build_artifact
 from fraudguard_ml.clickhouse import ClickHouseSettings, create_clickhouse_client
 from fraudguard_ml.config import load_yaml_config
 from fraudguard_ml.experiment_config import ExperimentConfig
+from fraudguard_ml.io_utils import write_json_immutable
 from fraudguard_ml.reproducibility import configure_thread_limits, seed_everything
 from fraudguard_ml.runtime import collect_runtime_metadata
 from fraudguard_ml.training_data_contract import (
@@ -36,6 +33,7 @@ from fraudguard_ml.training_data_contract import (
     TrainingDataContractConfig,
     validate_training_data_contract,
 )
+
 
 class MLCommandError(RuntimeError):
     """A safe domain error that can be printed without exposing credentials."""
@@ -57,8 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--repository-root", type=Path, default=Path.cwd())
     validate.add_argument(
         "--output",
-        type=Path,
-        default=Path("artifacts/ml/artifact.json"),
+        type=Path
     ) #Đường dẫn file cho file artifact 
 
     snapshot = subparsers.add_parser("snapshot-training-dataset")
@@ -323,7 +320,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         exit_code = dispatch(args)
     except MLCommandError as exc:
         parser.exit(2, f"{exc.category} error: {exc}\n")
-    except (OSError, ValueError, ValidationError, GpuRequiredError) as exc:
+    except (OSError, ValueError, ValidationError) as exc:
         parser.exit(2, f"configuration error: {exc}\n")
     except ArtifactError as exc:
         parser.exit(2, f"artifact error: {exc}\n")

@@ -24,6 +24,7 @@ from fraudguard_ml.training_data_contract import (
     RelationName,
 )
 
+
 def parse_utc(value: str) -> datetime:
     """Parse an ISO-8601 string and require an explicit UTC offset."""
 

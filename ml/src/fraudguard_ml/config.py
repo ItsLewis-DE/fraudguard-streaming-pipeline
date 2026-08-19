@@ -12,7 +12,6 @@ visible early and preventing configuration drift during a run.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt

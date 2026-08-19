@@ -30,6 +30,7 @@ from fraudguard_ml.dataset_manifest import DatasetManifest
 from fraudguard_ml.experiment_config import ExperimentConfig
 from fraudguard_ml.io_utils import write_json_immutable
 
+
 class TrainingError(RuntimeError):
     """Model training cannot produce a trustworthy artifact."""
 

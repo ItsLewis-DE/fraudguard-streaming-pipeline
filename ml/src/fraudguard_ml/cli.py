@@ -327,5 +327,5 @@ def main(argv: Sequence[str] | None = None) -> None:
     except DataContractError as exc:
         parser.exit(2, f"contract error: {exc}\n")
     except ClickHouseError:
-        parser.exit(2, "ClickHouse request failed\n")
+        parser.exit(2, f"ClickHouse request failed: {exc}\n")
     raise SystemExit(exit_code)

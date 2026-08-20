@@ -1,0 +1,22 @@
+
+    
+    
+
+with all_values as (
+
+    select
+        transaction_type as value_field,
+        count(*) as n_records
+
+    from `fraudguard_core`.`fct_transactions_labeled`
+    group by transaction_type
+
+)
+
+select *
+from all_values
+where value_field not in (
+    'CASH_IN','CASH_OUT','DEBIT','PAYMENT','TRANSFER'
+)
+
+

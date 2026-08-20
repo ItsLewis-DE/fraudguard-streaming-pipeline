@@ -30,9 +30,9 @@ dataset:
 
 split:
   strategy: temporal
-  train_end: "2026-01-21T20:00:00"
-  validation_end: "2026-01-26T20:00:00"
-  test_end: "2026-01-31T23:00:00"
+  train_end: "2026-01-21T20:00:00Z"
+  validation_end: "2026-01-26T20:00:00Z"
+  test_end: "2026-01-31T23:00:00Z"
 
 snapshot:
   storage_uri: s3://fraud-training-snapshots

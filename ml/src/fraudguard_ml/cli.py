@@ -50,41 +50,41 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     validate = subparsers.add_parser("validate-training-data")
-    validate.add_argument("--config", type=Path, required=True) #Đường dẫn file cho file contract
+    # Đường dẫn file cho file contract
+    validate.add_argument("--config", type=Path, required=True)
     validate.add_argument("--dbt-manifest", type=Path, required=True)
     validate.add_argument("--repository-root", type=Path, default=Path.cwd())
-    validate.add_argument(
-        "--output",
-        type=Path
-    ) #Đường dẫn file cho file artifact 
+    validate.add_argument("--output", type=Path)  # Đường dẫn cho file artifact
 
     snapshot = subparsers.add_parser("snapshot-training-dataset")
-    snapshot.add_argument("--config", type=Path, required=True) #File chứa experiment
-    snapshot.add_argument("--contract-artifact", type=Path, required=True) #Đường dẫn tới artifact
+    snapshot.add_argument("--config", type=Path, required=True)  # File experiment
+    # Đường dẫn tới artifact
+    snapshot.add_argument("--contract-artifact", type=Path, required=True)
     snapshot.add_argument("--repository-root", type=Path, default=Path.cwd())
     snapshot.add_argument("--dbt-manifest", type=Path, required=True)
     snapshot.add_argument("--run-id", required=True)
-    snapshot.add_argument("--output", type=Path, required=True) #Đường dẫn thư mục tới file 
-    #metadata local trên máy bắt buộc phải có dạng 
-    #experiment_name / run_id
+    # Đường dẫn thư mục metadata local dạng experiment_name/run_id
+    snapshot.add_argument("--output", type=Path, required=True)
 
     diagnostics = subparsers.add_parser("diagnose-training-splits")
-    diagnostics.add_argument("--config", type=Path, required=True)#File chứa experiment
+    diagnostics.add_argument("--config", type=Path, required=True)  # File experiment
     diagnostics.add_argument("--dataset-manifest", type=Path, required=True)
-    diagnostics.add_argument("--cache-dir", type=Path, required=True) #Thư mục tới file data.parquet
-    diagnostics.add_argument("--output", type=Path, required=True) #đường dẫn file cho file report
+    # Thư mục chứa data.parquet
+    diagnostics.add_argument("--cache-dir", type=Path, required=True)
+    # Đường dẫn cho file report
+    diagnostics.add_argument("--output", type=Path, required=True)
 
     train = subparsers.add_parser("train")
-    train.add_argument("--config", type=Path, required=True)#File chứa experiment
+    train.add_argument("--config", type=Path, required=True)  # File experiment
     train.add_argument("--dataset-manifest", type=Path, required=True)
-    train.add_argument("--cache-dir", type=Path, required=True)#Thư mục tới file data.parquet
-    train.add_argument("--output", type=Path, required=True)#Thư mục tới các file cần lưu
+    train.add_argument("--cache-dir", type=Path, required=True)  # Thư mục cache
+    train.add_argument("--output", type=Path, required=True)  # Thư mục output
 
     evaluate = subparsers.add_parser("evaluate")
-    evaluate.add_argument("--config", type=Path, required=True)#file challenger
+    evaluate.add_argument("--config", type=Path, required=True)  # File challenger
     evaluate.add_argument("--dataset-manifest", type=Path, required=True)
     evaluate.add_argument("--cache-dir", type=Path, required=True)
-    evaluate.add_argument("--model", type=Path, required=True) #đường dẫn tới file model
+    evaluate.add_argument("--model", type=Path, required=True)  # File model
     evaluate.add_argument("--output", type=Path, required=True)
     return parser
 

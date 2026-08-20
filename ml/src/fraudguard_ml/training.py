@@ -114,7 +114,8 @@ def select_threshold(
     #hàm flatnonzero dùng để lấy index
     if len(candidate_indices):
         candidate_recalls = recall[:-1][candidate_indices]
-        index = int(candidate_indices[np.argmax(candidate_recalls)]) #Trả ra index có gt lớn nhất
+        # Trả ra index có giá trị lớn nhất
+        index = int(candidate_indices[np.argmax(candidate_recalls)])
         reason = "max_recall_at_min_precision"
     else:
         denominator = precision[:-1] + recall[:-1]

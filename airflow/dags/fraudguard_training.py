@@ -8,7 +8,7 @@ from airflow.sdk import dag
 
 PROJECT = "/opt/airflow/project"
 ARTIFACT_ROOT = "/opt/airflow/artifacts/training/{{ ts_nodash }}"
-CONFIG = f"{PROJECT}/configs/training_baseline.yaml"
+CONFIG = f"{PROJECT}/configs/training_baseline.yml"
 CONTRACT = f"{PROJECT}/configs/training_data_contract.yml"
 DBT_TARGET = f"{ARTIFACT_ROOT}/dbt_target"
 CONTRACT_ARTIFACT = f"{ARTIFACT_ROOT}/artifact.json"

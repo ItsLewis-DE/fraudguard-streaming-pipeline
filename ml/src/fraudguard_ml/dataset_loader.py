@@ -13,6 +13,7 @@ from fraudguard_ml.dataset_manifest import DatasetManifest, ManifestError
 from fraudguard_ml.experiment_config import ExperimentConfig, parse_utc
 from fraudguard_ml.object_storage import download_file
 
+
 @dataclass(frozen=True)
 class FrameSplit:
     features: pd.DataFrame

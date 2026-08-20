@@ -34,7 +34,7 @@ class S3Location:
         """Parse a non-empty object URI and reject other URI schemes."""
 
         parsed = urlparse(uri)
-        if parsed.schema != "s3" or not parsed.netloc or not parsed.path.strip("/"):
+        if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.strip("/"):
             raise ValueError("S3 URI must be s3://bucket/key")
         return cls(bucket=parsed.netloc, key=parsed.path.lstrip("/"))
 

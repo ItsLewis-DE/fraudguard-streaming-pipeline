@@ -55,7 +55,7 @@ x-airflow-common: &airflow-common
     - airflow_config:/opt/airflow/config
     - ./dbt:/opt/airflow/dbt:ro
     - ./:/opt/airflow/project:ro
-    - airflow_ml_artifacts:/opt/airflow/artifacts
+    - ./airflow_ml_artifacts:/opt/airflow/artifacts
   depends_on: &airflow-common-depends-on
     airflow-postgres:
       condition: service_healthy
@@ -329,8 +329,8 @@ services:
       - -c
       - |
         set -e
-        mkdir -p /opt/airflow/logs /opt/airflow/config
-        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/config
+        mkdir -p /opt/airflow/logs /opt/airflow/config /opt/airflow/artifacts
+        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/config /opt/airflow/artifacts
         /entrypoint airflow version
     environment:
       <<: *airflow-common-environment

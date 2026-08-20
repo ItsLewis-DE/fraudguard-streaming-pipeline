@@ -221,14 +221,14 @@ def stream_snapshot(
                 #Tạo một mã x_or cho từng chunk, cộng dồn lại với nhau
                 for value in block[HELPER_HASH_COLUMN].to_pylist():
                     population_xor ^= int(value)
-                output_block = block.drop([HELPER_HASH_COLUMN])
+                output_block = block.drop_columns([HELPER_HASH_COLUMN])
                 if writer is None:
                     writer = pq.ParquetWriter(
                         temporary,
                         output_block.schema,
                         compression=config.snapshot.compression,
                     )
-                writer.write_table(output_block)
+                writer.write_batch(output_block)
         if writer is None:
             raise DataContractError("snapshot population is empty")
         writer.close()

@@ -130,7 +130,7 @@ def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str
         from {relation.quoted()}
         where event_time <= {{test_end:DateTime64(3, 'UTC')}}
     """
-    return query, {"test_end": config.split.test_end.strftime("%Y-%m-%d %H:%M:%S")}
+    return query, {"test_end": parse_utc(config.split.test_end).strftime("%Y-%m-%d %H:%M:%S")}
 
 
 def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:

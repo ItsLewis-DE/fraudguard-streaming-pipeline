@@ -247,11 +247,11 @@ def stream_snapshot(
         validation=split["validation"].freeze(),
         test=split["test"].freeze(),
     )
-    # if any(
-    #     item.row_count == 0 or item.fraud_count == 0
-    #     for item in (split_stats.train, split_stats.validation, split_stats.test)
-    # ):
-    #     raise SnapshotError("every split must contain rows and fraud positives")
+    if any(
+        item.row_count == 0 or item.fraud_count == 0
+        for item in (split_stats.train, split_stats.validation, split_stats.test)
+    ):
+        raise SnapshotError("every split must contain rows and fraud positives")
     return (
         total_stats,
         split_stats,

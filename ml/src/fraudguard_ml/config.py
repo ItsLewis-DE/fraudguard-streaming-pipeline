@@ -35,7 +35,6 @@ class RuntimeConfig(StrictModel):
     memory_limit_gib: PositiveFloat = 6.0
 
 
-
 def load_yaml_config[ConfigT: BaseModel](
     path: Path,
     model_type: type[ConfigT],
@@ -52,7 +51,7 @@ def load_yaml_config[ConfigT: BaseModel](
         raise ValueError(f"Cannot read config file: {path}") from exc
 
     try:
-        raw_data = yaml.safe_load(raw_text) #Trả về dict
+        raw_data = yaml.safe_load(raw_text)  # Trả về dict
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML syntax: {path}") from exc
 
@@ -61,4 +60,4 @@ def load_yaml_config[ConfigT: BaseModel](
             f"Config root must be a mapping, got {type(raw_data).__name__}: {path}"
         )
 
-    return model_type.model_validate(raw_data) #Kiểm tra với pydatic
+    return model_type.model_validate(raw_data)  # Kiểm tra với pydatic

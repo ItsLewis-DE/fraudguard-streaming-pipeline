@@ -42,7 +42,7 @@ class MLCommandError(RuntimeError):
         super().__init__(message)
         self.category = category
 
-        
+
 def build_parser() -> argparse.ArgumentParser:
     """Define the public CLI commands and their typed arguments."""
 
@@ -88,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", type=Path, required=True)
     return parser
 
+
 def configure_experiment_runtime(config: ExperimentConfig) -> dict[str, Any]:
     """Apply reproducibility settings and validate runtime requirements."""
 
@@ -99,10 +100,10 @@ def configure_experiment_runtime(config: ExperimentConfig) -> dict[str, Any]:
         "runtime": runtime.model_dump(mode="json"),
     }
 
-def run_validate_training_data(config_path: Path,
-    dbt_manifest_path: Path,
-    repository_root: Path,
-    output_path: Path) -> int:
+
+def run_validate_training_data(
+    config_path: Path, dbt_manifest_path: Path, repository_root: Path, output_path: Path
+) -> int:
     """Validate ClickHouse training data and persist its contract artifact.
 
     The database client is always closed. The returned report is wrapped by
@@ -122,13 +123,14 @@ def run_validate_training_data(config_path: Path,
         repository_root=repository_root,
         contract_path=config_path,
         lock_path=repository_root / "uv.lock",
-        dbt_manifest_path= dbt_manifest_path,
+        dbt_manifest_path=dbt_manifest_path,
         relevant_paths=[repository_root / "ml" / "src"],
     )
 
     write_json_immutable(output_path, artifact)
     print(f"\nReport successfully saved to: {output_path}")
     return 0
+
 
 def load_snapshot_context(
     config_path: Path,
@@ -152,7 +154,7 @@ def load_snapshot_context(
     )
 
     try:
-        manifest = load_manifest(manifest_path) #object Datasetmanifest
+        manifest = load_manifest(manifest_path)  # object Datasetmanifest
         s3_client = create_s3_client(ObjectStorageSettings.from_env())
         try:
             snapshot_path = materialize_snapshot(
@@ -172,6 +174,7 @@ def load_snapshot_context(
         raise MLCommandError("manifest", str(exc)) from exc
 
     return config, manifest, splits
+
 
 def run_snapshot_training_dataset(args: argparse.Namespace) -> int:
     """Create a snapshot and its manifest, then publish them to object storage."""
@@ -214,6 +217,7 @@ def run_snapshot_training_dataset(args: argparse.Namespace) -> int:
     print(json.dumps(manifest.model_dump(mode="json"), sort_keys=True))
     return 0
 
+
 def run_train(args: argparse.Namespace) -> int:
     """Train a model and persist its immutable model bundle and metrics."""
 
@@ -238,6 +242,7 @@ def run_train(args: argparse.Namespace) -> int:
 
     print(json.dumps(result, sort_keys=True))
     return 0
+
 
 def run_evaluate(args: argparse.Namespace) -> int:
     """Evaluate the frozen model and threshold against the test split."""
@@ -292,14 +297,15 @@ def run_split_diagnostics(args: argparse.Namespace) -> int:
     print(args.output)
     return 0
 
+
 def dispatch(args: argparse.Namespace) -> int:
     """Dispatch one already-parsed command."""
     if args.command == "validate-training-data":
         return run_validate_training_data(
-            args.config, #Path này là file contract
+            args.config,  # Path này là file contract
             args.dbt_manifest,
             args.repository_root,
-            args.output, #output cho file artifact
+            args.output,  # output cho file artifact
         )
     if args.command == "snapshot-training-dataset":
         return run_snapshot_training_dataset(args)
@@ -310,6 +316,7 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "evaluate":
         return run_evaluate(args)
     raise ValueError(f"unsupported command: {args.command}")
+
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Parse, dispatch and map expected failures to stable exit code 2."""

@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 from scipy.stats import ks_2samp  # được dùng để kiểm tra phân phối của
 
-#2 feature có giống nhau k
+# 2 feature có giống nhau k
 from fraudguard_ml.dataset_loader import DatasetSplits, FrameSplit
 from fraudguard_ml.io_utils import write_json_immutable
 
 EPSILON = 1e-6
+
 
 def basic_split_summary(split: FrameSplit) -> dict[str, Any]:
     row_count = len(split.target)
@@ -29,6 +30,7 @@ def basic_split_summary(split: FrameSplit) -> dict[str, Any]:
         },
     }
 
+
 def numeric_summary(series: pd.Series) -> dict[str, float | None]:
     numeric = pd.to_numeric(series, errors="coerce")
     if numeric.notna().sum() == 0:
@@ -41,9 +43,11 @@ def numeric_summary(series: pd.Series) -> dict[str, float | None]:
         "p95": float(numeric.quantile(0.95)),
     }
 
+
 def categorical_distribution(series: pd.Series) -> dict[str, float]:
     normalized = series.fillna("<MISSING>").astype(str).value_counts(normalize=True)
     return {str(key): float(value) for key, value in normalized.items()}
+
 
 def population_stability_index(
     reference: pd.Series,
@@ -64,6 +68,7 @@ def population_stability_index(
     cmp_rate = np.maximum(cmp_counts / cmp_counts.sum(), EPSILON)
     return float(np.sum((cmp_rate - ref_rate) * np.log(cmp_rate / ref_rate)))
 
+
 def numeric_drift(
     reference: pd.Series, comparison: pd.Series
 ) -> dict[str, float | None]:
@@ -77,6 +82,7 @@ def numeric_drift(
         "ks_statistic": float(ks.statistic),
         "ks_pvalue": float(ks.pvalue),
     }
+
 
 def build_split_diagnostics(
     splits: DatasetSplits,
@@ -119,6 +125,7 @@ def build_split_diagnostics(
             for name, value in split_map.items()
         }
     return report
+
 
 def write_diagnostics(path: Path, report: dict[str, Any]) -> None:
     write_json_immutable(path, report)

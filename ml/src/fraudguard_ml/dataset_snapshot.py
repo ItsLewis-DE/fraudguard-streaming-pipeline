@@ -130,7 +130,9 @@ def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str
         from {relation.quoted()}
         where event_time <= {{test_end:DateTime64(3, 'UTC')}}
     """
-    return query, {"test_end": parse_utc(config.split.test_end).strftime("%Y-%m-%d %H:%M:%S")}
+    return query, {
+        "test_end": parse_utc(config.split.test_end).strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 
 def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
@@ -144,7 +146,7 @@ def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
         payload, sort_keys=True, separators=(",", ":")
     ).encode()  # encode chuyển string
     # thành bytes
-    return hashlib.sha256(encoded).hexdigest() #Chỉ nhận bytes
+    return hashlib.sha256(encoded).hexdigest()  # Chỉ nhận bytes
 
 
 def validate_contract_artifact(path: Path, expected_relation: str) -> None:
@@ -210,7 +212,7 @@ def stream_snapshot(
                 if block.num_rows == 0:
                     continue
                 event_time = pd.to_datetime(block["event_time"].to_pandas(), utc=True)
-                #Vì chỉ lấy 1 cột nên khi to_pandas sẽ chuyển qua series
+                # Vì chỉ lấy 1 cột nên khi to_pandas sẽ chuyển qua series
                 target = (
                     block[config.dataset.target_column]
                     .to_numpy(zero_copy_only=False)
@@ -218,7 +220,7 @@ def stream_snapshot(
                 )
                 total.update(event_time, target)
                 update_split_stats(split, event_time, target, config)
-                #Tạo một mã x_or cho từng chunk, cộng dồn lại với nhau
+                # Tạo một mã x_or cho từng chunk, cộng dồn lại với nhau
                 for value in block[HELPER_HASH_COLUMN].to_pylist():
                     population_xor ^= int(value)
                 output_block = block.drop_columns([HELPER_HASH_COLUMN])

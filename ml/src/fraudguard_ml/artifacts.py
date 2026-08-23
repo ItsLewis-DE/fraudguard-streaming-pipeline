@@ -58,7 +58,7 @@ def collect_git_provenance(
     function raises :class:`ArtifactError` instead of recording weak provenance.
     """
 
-    #Bắt buộc phải commit các file đã đưa thì mới tiếp tục đc
+    # Bắt buộc phải commit các file đã đưa thì mới tiếp tục đc
     str_paths = [str(path.relative_to(repository_root)) for path in relative_paths]
     """
     Tiêu chí chọn ra những file trong relative_paths là
@@ -71,7 +71,7 @@ def collect_git_provenance(
     if status:
         raise ArtifactError("relevant source/config paths must be committed and clean")
     return {
-        #Lấy mã hash của commit mới nhất
+        # Lấy mã hash của commit mới nhất
         "git_sha": git_output(repository_root, ["rev-parse", "HEAD"]),
         "relevant_paths_clean": True,
         "relevant_paths": sorted(str_paths),
@@ -104,5 +104,3 @@ def build_artifact(
             "dbt_selection": "+tag:training",
         },
     }
-
-

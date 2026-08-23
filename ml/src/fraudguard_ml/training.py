@@ -46,6 +46,7 @@ def feature_groups(config: ExperimentConfig) -> tuple[list[str], list[str]]:
     ]
     return categorical, numeric
 
+
 def normalize_feature_types(
     frame: pd.DataFrame,
     config: ExperimentConfig,
@@ -59,6 +60,7 @@ def normalize_feature_types(
             "float64"
         )
     return normalized
+
 
 def build_pipeline(config: ExperimentConfig) -> Pipeline:
     categorical, numeric = feature_groups(config)
@@ -101,6 +103,7 @@ def build_pipeline(config: ExperimentConfig) -> Pipeline:
         ]
     )
 
+
 def select_threshold(
     target: pd.Series,
     probability: NDArray[np.float64],
@@ -110,8 +113,8 @@ def select_threshold(
     precision, recall, thresholds = precision_recall_curve(target, probability)
     if len(thresholds) == 0:
         raise TrainingError("validation probabilities cannot produce a threshold")
-    candidate_indices = np.flatnonzero(precision[:-1] >= min_precision) 
-    #hàm flatnonzero dùng để lấy index
+    candidate_indices = np.flatnonzero(precision[:-1] >= min_precision)
+    # hàm flatnonzero dùng để lấy index
     if len(candidate_indices):
         candidate_recalls = recall[:-1][candidate_indices]
         # Trả ra index có giá trị lớn nhất
@@ -132,6 +135,7 @@ def select_threshold(
         "validation_precision": float(precision[index]),
         "validation_recall": float(recall[index]),
     }
+
 
 def binary_metrics(
     target: pd.Series,
@@ -156,6 +160,7 @@ def binary_metrics(
         "alert_rate": float(prediction.mean()),
         "fraud_capture_rate": float(tp / (tp + fn)) if tp + fn else 0.0,
     }
+
 
 def write_joblib_immutable(destination: Path, payload: dict[str, Any]) -> None:
     if destination.exists():

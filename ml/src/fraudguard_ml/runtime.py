@@ -28,8 +28,8 @@ class RuntimeMetadata(BaseModel):
     random_seed: int
     python_version: str
     platform: str
-    cpu_logical_count: int #tổng số luồng cpu của máy chủ
-    cpu_available_count: int #số lượng cpi được cấp phép cho tiến trình hiện tại
+    cpu_logical_count: int  # tổng số luồng cpu của máy chủ
+    cpu_available_count: int  # số lượng cpi được cấp phép cho tiến trình hiện tại
     cpu_thread_limit: int
     host_memory_total_bytes: int
     host_memory_available_bytes: int
@@ -47,11 +47,14 @@ def _available_cpu_count() -> int:
             pass
     return os.cpu_count() or 1
 
+
 """
 Khi sử dụng hàm này giúp cho việc đảm bảo tính tái lập.
 Nếu chạy ra kết quả khác nhau giữa 2 máy thì dựa vào đây
 ta có thể biết được là do đâu
 """
+
+
 def collect_runtime_metadata(config: RuntimeConfig) -> RuntimeMetadata:
     """Collect runtime facts and enforce the configured GPU requirement."""
 
@@ -68,4 +71,3 @@ def collect_runtime_metadata(config: RuntimeConfig) -> RuntimeMetadata:
         host_memory_available_bytes=int(memory.available),
         configured_memory_limit_bytes=int(config.memory_limit_gib * 1024**3),
     )
-    

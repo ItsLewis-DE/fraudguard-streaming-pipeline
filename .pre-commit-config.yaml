@@ -19,10 +19,3 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
-
-      - id: pytest-smoke
-        name: pytest smoke
-        entry: uv run pytest -m smoke --no-cov
-        language: system
-        pass_filenames: false
-        types: [python]

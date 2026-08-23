@@ -1,0 +1,94 @@
+name: CI
+
+on: 
+    pull_request:
+    push:
+        branches:
+            - main 
+    workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Python and dbt checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Lint Python
+        run: >-
+          uv run ruff check
+          airflow/dags
+          ml/src/fraudguard_ml
+          ml/tests
+          producer
+          spark/jobs
+
+      - name: Run smoke tests
+        run: uv run pytest -m smoke --no-cov
+
+      - name: Parse dbt project
+        run: >-
+          uv run dbt parse
+          --project-dir dbt
+          --profiles-dir dbt
+          --target dev
+          --target-path "$RUNNER_TEMP/dbt-target"
+          --log-path "$RUNNER_TEMP/dbt-logs"
+          --no-partial-parse
+
+      - name: Check Python formatting
+        run: >-
+          uv run ruff format --check
+          airflow/dags
+          ml/src/fraudguard_ml
+          ml/tests
+          producer
+          spark/jobs
+
+      - name: Type check ML package
+        run: uv run mypy ml/src/fraudguard_ml ml/tests
+        
+  compose-config:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLICKHOUSE_LOADER_PASSWORD: ci-not-a-real-secret
+      DBT_CLICKHOUSE_PASSWORD: ci-not-a-real-secret
+      CLICKHOUSE_SUPERSET_PASSWORD: ci-not-a-real-secret
+      CLICKHOUSE_ML_PASSWORD: ci-not-a-real-secret
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose rendering
+        run: docker compose config --quiet
+

@@ -17,6 +17,7 @@ MANIFEST = f"{EXPERIMENT_DIR}/dataset_manifest.json"
 CACHE = f"{ARTIFACT_ROOT}/cache"
 MODEL_DIR = f"{EXPERIMENT_DIR}/model"
 
+
 @dag(
     dag_id="fraudguard_training_baseline",
     description="Immutable mart snapshot -> temporal train/validation/test",
@@ -28,7 +29,6 @@ MODEL_DIR = f"{EXPERIMENT_DIR}/model"
     default_args={"owner": "fraud-ml", "retries": 0},
     tags=["fraudguard", "ml", "training"],
 )
-
 def fraudguard_training_baseline():
     prepare_snapshot = BashOperator(
         task_id="prepare_snapshot",
@@ -58,7 +58,7 @@ def fraudguard_training_baseline():
         """,
         execution_timeout=timedelta(minutes=60),
     )
-    
+
     diagnostics = BashOperator(
         task_id="split_diagnostics",
         bash_command=f"""
@@ -100,5 +100,6 @@ def fraudguard_training_baseline():
     )
 
     prepare_snapshot >> diagnostics >> train >> evaluate
+
 
 fraudguard_training_baseline()

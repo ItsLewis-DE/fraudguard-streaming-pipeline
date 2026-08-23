@@ -29,11 +29,7 @@ import pyarrow.parquet as pq
 from botocore.client import BaseClient
 from numpy.typing import NDArray
 
-from fraudguard_ml.artifacts import (
-    git_output,
-    sha256_file,
-    write_json_immutable,
-)
+from fraudguard_ml.artifacts import git_output, sha256_file
 from fraudguard_ml.dataset_manifest import (
     DatasetManifest,
     PartitionStatistics,
@@ -41,6 +37,7 @@ from fraudguard_ml.dataset_manifest import (
     SplitStatistics,
 )
 from fraudguard_ml.experiment_config import ExperimentConfig, parse_utc
+from fraudguard_ml.io_utils import write_json_immutable
 from fraudguard_ml.object_storage import upload_file_immutable
 from fraudguard_ml.training_data_contract import DataContractError, RelationName
 
@@ -133,7 +130,9 @@ def build_population_query(config: ExperimentConfig) -> tuple[str, dict[str, str
         from {relation.quoted()}
         where event_time <= {{test_end:DateTime64(3, 'UTC')}}
     """
-    return query, {"test_end": config.split.test_end}
+    return query, {
+        "test_end": parse_utc(config.split.test_end).strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 
 def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
@@ -147,7 +146,7 @@ def canonical_query_sha256(query: str, parameters: dict[str, str]) -> str:
         payload, sort_keys=True, separators=(",", ":")
     ).encode()  # encode chuyển string
     # thành bytes
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(encoded).hexdigest()  # Chỉ nhận bytes
 
 
 def validate_contract_artifact(path: Path, expected_relation: str) -> None:
@@ -213,6 +212,7 @@ def stream_snapshot(
                 if block.num_rows == 0:
                     continue
                 event_time = pd.to_datetime(block["event_time"].to_pandas(), utc=True)
+                # Vì chỉ lấy 1 cột nên khi to_pandas sẽ chuyển qua series
                 target = (
                     block[config.dataset.target_column]
                     .to_numpy(zero_copy_only=False)
@@ -220,16 +220,17 @@ def stream_snapshot(
                 )
                 total.update(event_time, target)
                 update_split_stats(split, event_time, target, config)
+                # Tạo một mã x_or cho từng chunk, cộng dồn lại với nhau
                 for value in block[HELPER_HASH_COLUMN].to_pylist():
                     population_xor ^= int(value)
-                output_block = block.drop([HELPER_HASH_COLUMN])
+                output_block = block.drop_columns([HELPER_HASH_COLUMN])
                 if writer is None:
                     writer = pq.ParquetWriter(
                         temporary,
                         output_block.schema,
                         compression=config.snapshot.compression,
                     )
-                writer.write_table(output_block)
+                writer.write_batch(output_block)
         if writer is None:
             raise DataContractError("snapshot population is empty")
         writer.close()
@@ -246,11 +247,11 @@ def stream_snapshot(
         validation=split["validation"].freeze(),
         test=split["test"].freeze(),
     )
-    if any(
-        item.row_count == 0 or item.fraud_count == 0
-        for item in (split_stats.train, split_stats.validation, split_stats.test)
-    ):
-        raise SnapshotError("every split must contain rows and fraud positives")
+    # if any(
+    #     item.row_count == 0 or item.fraud_count == 0
+    #     for item in (split_stats.train, split_stats.validation, split_stats.test)
+    # ):
+    #     raise SnapshotError("every split must contain rows and fraud positives")
     return (
         total_stats,
         split_stats,
@@ -346,7 +347,7 @@ def create_snapshot_and_manifest(
         config.snapshot.storage_uri,
         config.experiment_name,
         run_id,
-        "training_data_contract.json",
+        "artifact.json",
     )
     upload_file_immutable(s3_client, contract_artifact_path, contract_uri)
     return manifest

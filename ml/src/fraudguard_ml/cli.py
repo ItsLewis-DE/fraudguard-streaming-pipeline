@@ -21,21 +21,19 @@ from typing import Any
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from pydantic import ValidationError
 
-from fraudguard_ml.artifacts import (
-    ArtifactError,
-    build_artifact,
-    write_json_immutable,
-)
+from fraudguard_ml.artifacts import ArtifactError, build_artifact
 from fraudguard_ml.clickhouse import ClickHouseSettings, create_clickhouse_client
-from fraudguard_ml.config import SmokeConfig, load_yaml_config
+from fraudguard_ml.config import load_yaml_config
 from fraudguard_ml.experiment_config import ExperimentConfig
+from fraudguard_ml.io_utils import write_json_immutable
 from fraudguard_ml.reproducibility import configure_thread_limits, seed_everything
-from fraudguard_ml.runtime import GpuRequiredError, collect_runtime_metadata
+from fraudguard_ml.runtime import collect_runtime_metadata
 from fraudguard_ml.training_data_contract import (
     DataContractError,
     TrainingDataContractConfig,
     validate_training_data_contract,
 )
+
 
 class MLCommandError(RuntimeError):
     """A safe domain error that can be printed without exposing credentials."""
@@ -44,64 +42,52 @@ class MLCommandError(RuntimeError):
         super().__init__(message)
         self.category = category
 
-        
+
 def build_parser() -> argparse.ArgumentParser:
     """Define the public CLI commands and their typed arguments."""
 
     parser = argparse.ArgumentParser(prog="fraudguard")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    smoke = subparsers.add_parser(
-        "smoke",
-        help="Validate package, config, seed and local runtime.",
-    )
-    smoke.add_argument(
-        "--config",
-        type=Path,
-        required=True,
-    )
-    smoke.add_argument(
-        "--json",
-        action="store_true",  # Gán giá trị cho nó là True
-        dest="json_output",
-    )
     validate = subparsers.add_parser("validate-training-data")
+    # Đường dẫn file cho file contract
     validate.add_argument("--config", type=Path, required=True)
     validate.add_argument("--dbt-manifest", type=Path, required=True)
     validate.add_argument("--repository-root", type=Path, default=Path.cwd())
-    validate.add_argument(
-        "--output",
-        type=Path,
-        default=Path("artifacts/ml/training_data_contract.json"),
-    )
+    validate.add_argument("--output", type=Path)  # Đường dẫn cho file artifact
 
     snapshot = subparsers.add_parser("snapshot-training-dataset")
-    snapshot.add_argument("--config", type=Path, required=True)
+    snapshot.add_argument("--config", type=Path, required=True)  # File experiment
+    # Đường dẫn tới artifact
     snapshot.add_argument("--contract-artifact", type=Path, required=True)
     snapshot.add_argument("--repository-root", type=Path, default=Path.cwd())
     snapshot.add_argument("--dbt-manifest", type=Path, required=True)
     snapshot.add_argument("--run-id", required=True)
+    # Đường dẫn thư mục metadata local dạng experiment_name/run_id
     snapshot.add_argument("--output", type=Path, required=True)
 
     diagnostics = subparsers.add_parser("diagnose-training-splits")
-    diagnostics.add_argument("--config", type=Path, required=True)
+    diagnostics.add_argument("--config", type=Path, required=True)  # File experiment
     diagnostics.add_argument("--dataset-manifest", type=Path, required=True)
+    # Thư mục chứa data.parquet
     diagnostics.add_argument("--cache-dir", type=Path, required=True)
+    # Đường dẫn cho file report
     diagnostics.add_argument("--output", type=Path, required=True)
 
     train = subparsers.add_parser("train")
-    train.add_argument("--config", type=Path, required=True)
+    train.add_argument("--config", type=Path, required=True)  # File experiment
     train.add_argument("--dataset-manifest", type=Path, required=True)
-    train.add_argument("--cache-dir", type=Path, required=True)
-    train.add_argument("--output", type=Path, required=True)
+    train.add_argument("--cache-dir", type=Path, required=True)  # Thư mục cache
+    train.add_argument("--output", type=Path, required=True)  # Thư mục output
 
     evaluate = subparsers.add_parser("evaluate")
-    evaluate.add_argument("--config", type=Path, required=True)
+    evaluate.add_argument("--config", type=Path, required=True)  # File challenger
     evaluate.add_argument("--dataset-manifest", type=Path, required=True)
     evaluate.add_argument("--cache-dir", type=Path, required=True)
-    evaluate.add_argument("--model", type=Path, required=True)
+    evaluate.add_argument("--model", type=Path, required=True)  # File model
     evaluate.add_argument("--output", type=Path, required=True)
     return parser
+
 
 def configure_experiment_runtime(config: ExperimentConfig) -> dict[str, Any]:
     """Apply reproducibility settings and validate runtime requirements."""
@@ -114,9 +100,10 @@ def configure_experiment_runtime(config: ExperimentConfig) -> dict[str, Any]:
         "runtime": runtime.model_dump(mode="json"),
     }
 
-def run_validate_training_data(config_path: Path,
-    output_path: Path,
-    repository_root: Path) -> int:
+
+def run_validate_training_data(
+    config_path: Path, dbt_manifest_path: Path, repository_root: Path, output_path: Path
+) -> int:
     """Validate ClickHouse training data and persist its contract artifact.
 
     The database client is always closed. The returned report is wrapped by
@@ -136,6 +123,7 @@ def run_validate_training_data(config_path: Path,
         repository_root=repository_root,
         contract_path=config_path,
         lock_path=repository_root / "uv.lock",
+        dbt_manifest_path=dbt_manifest_path,
         relevant_paths=[repository_root / "ml" / "src"],
     )
 
@@ -143,31 +131,6 @@ def run_validate_training_data(config_path: Path,
     print(f"\nReport successfully saved to: {output_path}")
     return 0
 
-
-def run_smoke(config_path: Path, json_output: bool) -> int:
-    """Check configuration, deterministic seeding, and local compute resources."""
-
-    config = load_yaml_config(config_path, SmokeConfig)
-    configure_thread_limits(config.runtime.max_cpu_threads)
-    seed_status = seed_everything(config.runtime.random_seed)
-    runtime = collect_runtime_metadata(config.runtime)
-
-    result = {
-        "status": "ok bro",
-        "config": config.model_dump(mode="json"),
-        "seed_status": seed_status,
-        "runtime": runtime.model_dump(mode="json"),
-    }
-    if json_output:
-        print(json.dumps(result, indent=2, sort_keys=True))
-    else:
-        print(
-            "FraudGuard smoke check passed: "
-            f"cpus={runtime.cpu_available_count}, "
-            f"gpu={runtime.gpu_available}, "
-            f"seed={runtime.random_seed}"
-        )
-    return 0
 
 def load_snapshot_context(
     config_path: Path,
@@ -191,7 +154,7 @@ def load_snapshot_context(
     )
 
     try:
-        manifest = load_manifest(manifest_path)
+        manifest = load_manifest(manifest_path)  # object Datasetmanifest
         s3_client = create_s3_client(ObjectStorageSettings.from_env())
         try:
             snapshot_path = materialize_snapshot(
@@ -211,6 +174,7 @@ def load_snapshot_context(
         raise MLCommandError("manifest", str(exc)) from exc
 
     return config, manifest, splits
+
 
 def run_snapshot_training_dataset(args: argparse.Namespace) -> int:
     """Create a snapshot and its manifest, then publish them to object storage."""
@@ -253,6 +217,7 @@ def run_snapshot_training_dataset(args: argparse.Namespace) -> int:
     print(json.dumps(manifest.model_dump(mode="json"), sort_keys=True))
     return 0
 
+
 def run_train(args: argparse.Namespace) -> int:
     """Train a model and persist its immutable model bundle and metrics."""
 
@@ -277,6 +242,7 @@ def run_train(args: argparse.Namespace) -> int:
 
     print(json.dumps(result, sort_keys=True))
     return 0
+
 
 def run_evaluate(args: argparse.Namespace) -> int:
     """Evaluate the frozen model and threshold against the test split."""
@@ -331,17 +297,15 @@ def run_split_diagnostics(args: argparse.Namespace) -> int:
     print(args.output)
     return 0
 
+
 def dispatch(args: argparse.Namespace) -> int:
     """Dispatch one already-parsed command."""
-
-    if args.command == "smoke":
-        return run_smoke(args.config, args.json_output)
     if args.command == "validate-training-data":
         return run_validate_training_data(
-            args.config,
+            args.config,  # Path này là file contract
             args.dbt_manifest,
             args.repository_root,
-            args.output,
+            args.output,  # output cho file artifact
         )
     if args.command == "snapshot-training-dataset":
         return run_snapshot_training_dataset(args)
@@ -353,6 +317,7 @@ def dispatch(args: argparse.Namespace) -> int:
         return run_evaluate(args)
     raise ValueError(f"unsupported command: {args.command}")
 
+
 def main(argv: Sequence[str] | None = None) -> None:
     """Parse, dispatch and map expected failures to stable exit code 2."""
 
@@ -362,12 +327,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         exit_code = dispatch(args)
     except MLCommandError as exc:
         parser.exit(2, f"{exc.category} error: {exc}\n")
-    except (OSError, ValueError, ValidationError, GpuRequiredError) as exc:
+    except (OSError, ValueError, ValidationError) as exc:
         parser.exit(2, f"configuration error: {exc}\n")
     except ArtifactError as exc:
         parser.exit(2, f"artifact error: {exc}\n")
     except DataContractError as exc:
         parser.exit(2, f"contract error: {exc}\n")
-    except ClickHouseError:
-        parser.exit(2, "ClickHouse request failed\n")
+    except ClickHouseError as exc:
+        parser.exit(2, f"ClickHouse request failed: {exc}\n")
     raise SystemExit(exit_code)

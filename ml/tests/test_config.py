@@ -1,14 +1,22 @@
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
-from fraudguard_ml.config import SmokeConfig, load_yaml_config
+from fraudguard_ml.config import RuntimeConfig, StrictModel, load_yaml_config
 
 pytestmark = pytest.mark.smoke
+
+
+class LoaderConfig(StrictModel):
+    """Minimal nested schema used to exercise the shared YAML loader."""
+
+    schema_version: Literal[1] = 1
+    project_name: Literal["fraudguard"] = "fraudguard"
+    runtime: RuntimeConfig
 
 
 def _valid_config_data(
@@ -19,7 +27,6 @@ def _valid_config_data(
         "random_seed": 42,
         "max_cpu_threads": 8,
         "memory_limit_gib": 6.0,
-        "require_gpu": False,
     }
     if runtime_overrides is not None:
         runtime.update(runtime_overrides)
@@ -44,15 +51,14 @@ def _write_yaml(tmp_path: Path, data: Any) -> Path:
 def test_loads_valid_yaml(tmp_path: Path) -> None:
     config_path = _write_yaml(tmp_path, _valid_config_data())
 
-    config = load_yaml_config(config_path, SmokeConfig)
+    config = load_yaml_config(config_path, LoaderConfig)
 
-    assert isinstance(config, SmokeConfig)
+    assert isinstance(config, LoaderConfig)
     assert config.schema_version == 1
     assert config.project_name == "fraudguard"
     assert config.runtime.random_seed == 42
     assert config.runtime.max_cpu_threads == 8
     assert config.runtime.memory_limit_gib == 6.0
-    assert config.runtime.require_gpu is False
 
 
 def test_rejects_missing_config_file(tmp_path: Path) -> None:
@@ -62,7 +68,7 @@ def test_rejects_missing_config_file(tmp_path: Path) -> None:
         ValueError,
         match=r"Cannot read config file:",
     ) as exc_info:
-        load_yaml_config(missing_path, SmokeConfig)
+        load_yaml_config(missing_path, LoaderConfig)
 
     assert isinstance(exc_info.value.__cause__, FileNotFoundError)
 
@@ -78,7 +84,7 @@ def test_rejects_malformed_yaml(tmp_path: Path) -> None:
         ValueError,
         match=r"Invalid YAML syntax:",
     ) as exc_info:
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
     assert isinstance(exc_info.value.__cause__, yaml.YAMLError)
 
@@ -97,7 +103,7 @@ def test_rejects_non_mapping_yaml_root(
     with pytest.raises(
         ValueError, match=rf"Config root must be a mapping, got {root_type}:"
     ):
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
 
 def _assert_validation_error(
@@ -119,7 +125,7 @@ def test_rejects_unknown_field(tmp_path: Path) -> None:
     config_path = _write_yaml(tmp_path, data)
 
     with pytest.raises(ValidationError) as exc_info:
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
     _assert_validation_error(
         exc_info.value,
@@ -147,7 +153,7 @@ def test_rejects_seed_outside_supported_range(
     )
 
     with pytest.raises(ValidationError) as exc_info:
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
     _assert_validation_error(
         exc_info.value,
@@ -163,7 +169,7 @@ def test_rejects_string_for_integer_in_strict_mode(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValidationError) as exc_info:
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
     _assert_validation_error(
         exc_info.value,
@@ -201,7 +207,7 @@ def test_rejects_non_positive_resource_limit(
     )
 
     with pytest.raises(ValidationError) as exc_info:
-        load_yaml_config(config_path, SmokeConfig)
+        load_yaml_config(config_path, LoaderConfig)
 
     _assert_validation_error(
         exc_info.value,
@@ -225,7 +231,7 @@ def test_loaded_config_is_immutable(
     new_value: object,
 ) -> None:
     config_path = _write_yaml(tmp_path, _valid_config_data())
-    config = load_yaml_config(config_path, SmokeConfig)
+    config = load_yaml_config(config_path, LoaderConfig)
     target = config if target_name == "config" else config.runtime
 
     with pytest.raises(ValidationError) as exc_info:
@@ -236,4 +242,3 @@ def test_loaded_config_is_immutable(
         location=(field_name,),
         error_type="frozen_instance",
     )
-

@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ManifestError(RuntimeError):
@@ -97,6 +97,11 @@ class DatasetManifest(FrozenModel):
     contract_artifact_sha256: str
     git_sha: str
     split_statistics: SplitStatistics
+
+    @field_validator("feature_list", mode="before")
+    @classmethod
+    def freeze_feature_list(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
 
     @model_validator(mode="after")
     def validate_totals(self) -> DatasetManifest:

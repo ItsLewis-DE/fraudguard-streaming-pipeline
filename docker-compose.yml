@@ -36,16 +36,26 @@ x-airflow-common: &airflow-common
     DBT_TARGET_PATH: /opt/airflow/logs/dbt/target
     DBT_LOG_PATH: /opt/airflow/logs/dbt/logs
 
+    PYTHONPATH: /opt/airflow/project/ml/src
+    CLICKHOUSE_ML_HOST: clickhouse
+    CLICKHOUSE_ML_PORT: "8123"
+    CLICKHOUSE_ML_DATABASE: fraudguard
+    CLICKHOUSE_ML_USER: fraudguard_ml_reader
+    CLICKHOUSE_ML_PASSWORD: ${CLICKHOUSE_ML_PASSWORD:?CLICKHOUSE_ML_PASSWORD must be set}
+    CLICKHOUSE_ML_SECURE: "false"
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_ACCESS_KEY: ${MINIO_AIRFLOW_USER:-fraudguard}
+    MINIO_SECRET_KEY: ${MINIO_AIRFLOW_PASSWORD:-fraudguard-secret}
+    
   user: "${AIRFLOW_UID:-50000}:0"
   volumes:
     - ./airflow/dags:/opt/airflow/dags:ro
     - ./airflow/plugins:/opt/airflow/plugins:ro
     - airflow_logs:/opt/airflow/logs
     - airflow_config:/opt/airflow/config
-    - ./airflow/dags:/opt/airflow/dags:ro
-    - ./airflow/plugins:/opt/airflow/plugins:ro
     - ./dbt:/opt/airflow/dbt:ro
-    - airflow_logs:/opt/airflow/logs
+    - ./:/opt/airflow/project:ro
+    - ./airflow_ml_artifacts:/opt/airflow/artifacts
   depends_on: &airflow-common-depends-on
     airflow-postgres:
       condition: service_healthy
@@ -319,8 +329,8 @@ services:
       - -c
       - |
         set -e
-        mkdir -p /opt/airflow/logs /opt/airflow/config
-        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/config
+        mkdir -p /opt/airflow/logs /opt/airflow/config /opt/airflow/artifacts
+        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/config /opt/airflow/artifacts
         /entrypoint airflow version
     environment:
       <<: *airflow-common-environment
@@ -404,3 +414,4 @@ volumes:
   airflow_postgres_data:
   airflow_logs:
   airflow_config:
+  airflow_ml_artifacts:

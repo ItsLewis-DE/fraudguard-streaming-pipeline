@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from fraudguard_ml.artifacts import ArtifactError, write_json_atomic
+from fraudguard_ml.artifacts import ArtifactError
+from fraudguard_ml.io_utils import write_json_atomic
 
 
 def test_atomic_writer_replaces_complete_json(tmp_path: Path) -> None:
@@ -27,7 +28,7 @@ def test_atomic_writer_keeps_no_temporary_file_on_failure(
     def fail_replace(source: str | Path, destination: str | Path) -> None:
         raise OSError("simulated")
 
-    monkeypatch.setattr("fraudguard_ml.artifacts.os.replace", fail_replace)
+    monkeypatch.setattr("fraudguard_ml.io_utils.os.replace", fail_replace)
 
     with pytest.raises(ArtifactError, match="atomically"):
         write_json_atomic(output, {"status": "validated"})

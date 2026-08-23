@@ -5,10 +5,11 @@ from typing import Any
 
 import joblib
 
-from fraudguard_ml.artifacts import sha256_file, write_json_immutable
+from fraudguard_ml.artifacts import sha256_file
 from fraudguard_ml.dataset_loader import FrameSplit
 from fraudguard_ml.dataset_manifest import DatasetManifest, ManifestError
 from fraudguard_ml.experiment_config import ExperimentConfig
+from fraudguard_ml.io_utils import write_json_immutable
 from fraudguard_ml.training import binary_metrics, normalize_feature_types
 
 

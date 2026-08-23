@@ -12,7 +12,6 @@ visible early and preventing configuration drift during a run.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
@@ -34,15 +33,6 @@ class RuntimeConfig(StrictModel):
     random_seed: int = Field(42, ge=0, le=4_294_967_295)
     max_cpu_threads: PositiveInt = 8
     memory_limit_gib: PositiveFloat = 6.0
-    require_gpu: bool = False
-
-
-class SmokeConfig(StrictModel):
-    """Top-level schema consumed by the ``fraudguard smoke`` command."""
-
-    schema_version: Literal[1] = 1
-    project_name: Literal["fraudguard"] = "fraudguard"
-    runtime: RuntimeConfig
 
 
 def load_yaml_config[ConfigT: BaseModel](
@@ -61,7 +51,7 @@ def load_yaml_config[ConfigT: BaseModel](
         raise ValueError(f"Cannot read config file: {path}") from exc
 
     try:
-        raw_data = yaml.safe_load(raw_text)
+        raw_data = yaml.safe_load(raw_text)  # Trả về dict
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML syntax: {path}") from exc
 
@@ -70,4 +60,4 @@ def load_yaml_config[ConfigT: BaseModel](
             f"Config root must be a mapping, got {type(raw_data).__name__}: {path}"
         )
 
-    return model_type.model_validate(raw_data)
+    return model_type.model_validate(raw_data)  # Kiểm tra với pydatic

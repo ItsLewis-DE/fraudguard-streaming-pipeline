@@ -119,3 +119,15 @@ branch = true  # Bật chế độ đo bao phủ nhánh (Branch coverage)
 [tool.coverage.report]
 show_missing = true
 skip_empty = true # Bỏ qua các file rỗng (như __init__.py) khỏi kết quả
+
+[[tool.mypy.overrides]]
+module = [
+    "boto3.*",
+    "botocore.*",
+    "joblib.*",
+    "pandas.*",
+    "pyarrow.*",
+    "scipy.*",
+    "sklearn.*",
+]
+ignore_missing_imports = true

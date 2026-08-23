@@ -13,6 +13,7 @@ from fraudguard_ml.dataset_manifest import DatasetManifest, ManifestError
 from fraudguard_ml.experiment_config import ExperimentConfig, parse_utc
 from fraudguard_ml.object_storage import download_file
 
+
 @dataclass(frozen=True)
 class FrameSplit:
     features: pd.DataFrame
@@ -26,6 +27,7 @@ class DatasetSplits:
     train: FrameSplit
     validation: FrameSplit
     test: FrameSplit
+
 
 def verify_manifest_config(
     manifest: DatasetManifest,
@@ -52,6 +54,7 @@ def verify_manifest_config(
     if boundaries != configured:
         raise ManifestError("manifest split boundaries do not match config")
 
+
 def materialize_snapshot(
     *,
     s3_client: BaseClient,
@@ -74,6 +77,7 @@ def materialize_snapshot(
         raise ManifestError("downloaded snapshot size does not match manifest")
     return destination
 
+
 def read_one_split(
     *,
     snapshot_path: Path,
@@ -91,7 +95,7 @@ def read_one_split(
         )
     )
     table = pq.read_table(snapshot_path, columns=columns, filters=filters)
-    #filter ở đây sẽ giúp lọc dữ liệu ngay khi đọc file
+    # filter ở đây sẽ giúp lọc dữ liệu ngay khi đọc file
     frame = table.to_pandas()
     if frame.empty:
         raise ManifestError("temporal split is empty")

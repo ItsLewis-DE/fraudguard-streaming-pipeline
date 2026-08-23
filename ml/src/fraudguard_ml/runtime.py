@@ -2,8 +2,6 @@
 
 Flow:
     1. Measure logical and container-available CPUs plus host memory.
-    2. Optionally import PyTorch and probe usable CUDA devices defensively.
-    3. Enforce ``require_gpu`` when requested by configuration.
     4. Return an immutable metadata record for logs and artifacts.
 
 Optional GPU discovery never makes CPU-only runs fail because of a broken or
@@ -12,26 +10,14 @@ partially installed CUDA stack.
 
 from __future__ import annotations
 
-import importlib
 import os
 import platform
 import sys
-from typing import Any
 
 import psutil
 from pydantic import BaseModel, ConfigDict
 
 from fraudguard_ml.config import RuntimeConfig
-
-
-class GpuDevice(BaseModel):
-    """Serializable identity and memory capacity of one CUDA device."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    index: int
-    name: str
-    memory_total_bytes: int | None
 
 
 class RuntimeMetadata(BaseModel):
@@ -42,19 +28,12 @@ class RuntimeMetadata(BaseModel):
     random_seed: int
     python_version: str
     platform: str
-    cpu_logical_count: int
-    cpu_available_count: int
+    cpu_logical_count: int  # tổng số luồng cpu của máy chủ
+    cpu_available_count: int  # số lượng cpi được cấp phép cho tiến trình hiện tại
     cpu_thread_limit: int
     host_memory_total_bytes: int
     host_memory_available_bytes: int
     configured_memory_limit_bytes: int
-    gpu_available: bool
-    gpu_backend: str | None
-    gpu_devices: tuple[GpuDevice, ...]
-
-
-class GpuRequiredError(RuntimeError):
-    """Raised when a run requires GPU but no usable CUDA backend is available."""
 
 
 def _available_cpu_count() -> int:
@@ -69,57 +48,17 @@ def _available_cpu_count() -> int:
     return os.cpu_count() or 1
 
 
-def _load_torch() -> Any | None:
-    """Import optional PyTorch safely, returning ``None`` when unusable."""
-
-    try:
-        return importlib.import_module("torch")
-    except (ImportError, OSError):
-        # An optional probe must tolerate missing or broken native dependencies.
-        return None
-
-
-def _detect_torch_cuda() -> tuple[bool, str | None, tuple[GpuDevice, ...]]:
-    """Probe PyTorch CUDA and return availability, backend name, and devices."""
-
-    torch = _load_torch()
-    if torch is None:
-        return False, None, ()
-
-    try:
-        cuda = torch.cuda
-        if not cuda.is_available():
-            return False, None, ()
-
-        devices = tuple(
-            GpuDevice(
-                index=index,
-                name=str(cuda.get_device_name(index)),
-                memory_total_bytes=int(cuda.get_device_properties(index).total_memory),
-            )
-            for index in range(cuda.device_count())
-        )
-    except (AssertionError, AttributeError, RuntimeError, OSError):
-        # A partially installed or incompatible CUDA stack is not usable.
-        return False, None, ()
-
-    if not devices:
-        return False, None, ()
-    return True, "torch-cuda", devices
+"""
+Khi sử dụng hàm này giúp cho việc đảm bảo tính tái lập.
+Nếu chạy ra kết quả khác nhau giữa 2 máy thì dựa vào đây
+ta có thể biết được là do đâu
+"""
 
 
 def collect_runtime_metadata(config: RuntimeConfig) -> RuntimeMetadata:
     """Collect runtime facts and enforce the configured GPU requirement."""
 
     memory = psutil.virtual_memory()
-    gpu_available, gpu_backend, gpu_devices = _detect_torch_cuda()
-
-    if config.require_gpu and not gpu_available:
-        raise GpuRequiredError(
-            "runtime.require_gpu=true, but no usable PyTorch CUDA backend "
-            "was detected. Install a CUDA-compatible PyTorch build and verify "
-            "that torch.cuda.is_available() returns True."
-        )
 
     return RuntimeMetadata(
         random_seed=config.random_seed,
@@ -131,7 +70,4 @@ def collect_runtime_metadata(config: RuntimeConfig) -> RuntimeMetadata:
         host_memory_total_bytes=int(memory.total),
         host_memory_available_bytes=int(memory.available),
         configured_memory_limit_bytes=int(config.memory_limit_gib * 1024**3),
-        gpu_available=gpu_available,
-        gpu_backend=gpu_backend,
-        gpu_devices=gpu_devices,
     )

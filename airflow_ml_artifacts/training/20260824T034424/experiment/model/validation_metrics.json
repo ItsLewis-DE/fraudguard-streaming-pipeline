@@ -1,0 +1,23 @@
+{
+  "alert_rate": 0.11638316920322292,
+  "confusion_matrix": {
+    "false_negative": 1,
+    "false_positive": 117,
+    "true_negative": 986,
+    "true_positive": 13
+  },
+  "dataset_manifest_sha256": "3c602f23ea7d9a9514da367bc3040df5332bbba42e7337ff98155c1c9626007e",
+  "f1": 0.18055555555555555,
+  "fraud_capture_rate": 0.9285714285714286,
+  "population_fingerprint": "xor64:3f1a400c9204dedc",
+  "pr_auc": 0.5660778232644794,
+  "precision": 0.1,
+  "recall": 0.9285714285714286,
+  "roc_auc": 0.9323274187281441,
+  "threshold": 0.0739802434857617,
+  "threshold_selection": {
+    "strategy_result": "max_recall_at_min_precision",
+    "validation_precision": 0.1,
+    "validation_recall": 0.9285714285714286
+  }
+}

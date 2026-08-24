@@ -1,0 +1,27 @@
+{
+  "dataset_manifest_sha256": "3c602f23ea7d9a9514da367bc3040df5332bbba42e7337ff98155c1c9626007e",
+  "evaluation_schema_version": 1,
+  "experiment_name": "fraudguard_logistic_baseline",
+  "label_policy": "static_final_labels",
+  "metrics": {
+    "alert_rate": 0.10684769775678866,
+    "confusion_matrix": {
+      "false_negative": 1,
+      "false_positive": 166,
+      "true_negative": 1512,
+      "true_positive": 15
+    },
+    "f1": 0.15228426395939088,
+    "fraud_capture_rate": 0.9375,
+    "pr_auc": 0.1437200421111739,
+    "precision": 0.08287292817679558,
+    "recall": 0.9375,
+    "roc_auc": 0.9157851609058404,
+    "threshold": 0.0739802434857617
+  },
+  "model_sha256": "8e3b918caf5fa1497805e19713c4576c7e34abe8d2899e7558deb03bc60fd854",
+  "population_fingerprint": "xor64:3f1a400c9204dedc",
+  "run_id": "20260824T034424",
+  "snapshot_sha256": "58e39c51bcdabe5007e4dbe6c77709e8736a748475b0db16f25bcdd82e4ec178",
+  "split": "test"
+}

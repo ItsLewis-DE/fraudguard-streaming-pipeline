@@ -162,6 +162,9 @@ configs/training_xgboost_balance.yml
 
 ## 7. Phase 3 — Tạo model interface chung
 
+Hướng dẫn triển khai đầy đủ, gồm model interface, adapters, tests và Definition
+of Done: [`PHASE_3_MODELING_INTERFACE.md`](PHASE_3_MODELING_INTERFACE.md).
+
 ### Mục tiêu thiết kế
 
 `training.py` không cần biết chi tiết Logistic hay XGBoost. Tạo module mới:

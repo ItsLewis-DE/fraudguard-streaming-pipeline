@@ -27,7 +27,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from fraudguard_ml.artifacts import ArtifactError, sha256_file
 from fraudguard_ml.dataset_loader import DatasetSplits
 from fraudguard_ml.dataset_manifest import DatasetManifest
-from fraudguard_ml.experiment_config import ExperimentConfig
+from fraudguard_ml.experiment_config import ExperimentConfig, LogisticRegressionConfig, XGBoostConfig
 from fraudguard_ml.io_utils import write_json_immutable
 
 
@@ -90,9 +90,9 @@ def build_pipeline(config: ExperimentConfig) -> Pipeline:
         verbose_feature_names_out=True,
     )
     estimator = LogisticRegression(
-        C=config.model.regularization_c,
-        class_weight=config.model.class_weight,
-        max_iter=config.model.max_iter,
+        C=model_config.regularization_c,
+        class_weight=model_config.class_weight,
+        max_iter=model_config.max_iter,
         random_state=config.runtime.random_seed,
         solver="lbfgs",
     )

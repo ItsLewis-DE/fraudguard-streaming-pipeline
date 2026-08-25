@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, PositiveFloat, PositiveInt, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from fraudguard_ml.config import RuntimeConfig, StrictModel
 from fraudguard_ml.training_data_contract import (
@@ -186,8 +186,6 @@ ModelConfig = Annotated[
     LogisticRegressionConfig | XGBoostConfig,
     Field(discriminator="kind"),
 ]
-
-
 
 class EvaluationConfig(StrictModel):
     """Threshold-selection policy used on the validation partition."""

@@ -1,0 +1,110 @@
+{
+  "artifact_schema_version": 1,
+  "provenance": {
+    "dbt_selection": "+tag:training",
+    "git_sha": "87ba375f9ba32e8b8ccf7fea2da2fba074349741",
+    "relevant_paths": [
+      "ml/src"
+    ],
+    "relevant_paths_clean": true,
+    "sha256": {
+      "contract": "ff89b5a286c1ede47139ebe9e358c45545bc4b7e4933cebf1a3cfebd7bc5d353",
+      "dbt_manifest": "7bca4b2a5f4cd4070853aea61ef4d15d82f184eceb3e1cd200f4820dc48cc82b",
+      "lockfile": "4f1d43323be6fc55e18083d17f1b74b378788d3edde014d688e860a8dd39ebc5"
+    }
+  },
+  "status": "validated",
+  "validation": {
+    "dataset_name": "paysim_training_transactions_v1",
+    "metrics": {
+      "distinct_key_count": 6534,
+      "empty_key_count": 0,
+      "invalid_source_count": 0,
+      "invalid_target_count": 0,
+      "invalid_type_count": 0,
+      "missing_lineage_count": 0,
+      "null_count": 0,
+      "row_count": 6534
+    },
+    "relation": "fraudguard_ml.ml_training_transactions",
+    "schema": [
+      [
+        "source",
+        "LowCardinality(String)"
+      ],
+      [
+        "event_id",
+        "String"
+      ],
+      [
+        "event_time",
+        "DateTime64(3, 'UTC')"
+      ],
+      [
+        "event_date",
+        "Date"
+      ],
+      [
+        "step",
+        "UInt16"
+      ],
+      [
+        "transaction_type",
+        "LowCardinality(String)"
+      ],
+      [
+        "amount",
+        "Decimal(18, 2)"
+      ],
+      [
+        "origin_balance_before",
+        "Decimal(18, 2)"
+      ],
+      [
+        "origin_balance_after",
+        "Decimal(18, 2)"
+      ],
+      [
+        "destination_balance_before",
+        "Decimal(18, 2)"
+      ],
+      [
+        "destination_balance_after",
+        "Decimal(18, 2)"
+      ],
+      [
+        "origin_balance_delta",
+        "Decimal(18, 2)"
+      ],
+      [
+        "destination_balance_delta",
+        "Decimal(18, 2)"
+      ],
+      [
+        "origin_amount_residual",
+        "Decimal(18, 2)"
+      ],
+      [
+        "destination_amount_residual",
+        "Decimal(18, 2)"
+      ],
+      [
+        "origin_balance_before_is_zero",
+        "UInt8"
+      ],
+      [
+        "destination_balance_before_is_zero",
+        "UInt8"
+      ],
+      [
+        "destination_balance_after_is_zero",
+        "UInt8"
+      ],
+      [
+        "is_fraud",
+        "UInt8"
+      ]
+    ],
+    "validated_at_utc": "2026-08-25T08:16:29.245464+00:00"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "contract_artifact_sha256": "0a56db711e84ed6c9deb09e731da5f300180f0a138d566fad5ddf7a2294bc5d8",
+  "created_at_utc": "2026-08-25T08:16:31.347605+00:00",
+  "data_fingerprint": "sha256:202a63faeb40136699c3967c08e3713eae2e549f8f0a9532110fbc46a458b422",
+  "dbt_manifest_sha256": "7bca4b2a5f4cd4070853aea61ef4d15d82f184eceb3e1cd200f4820dc48cc82b",
+  "experiment_name": "fraudguard_logistic_baseline",
+  "feature_list": [
+    "transaction_type",
+    "amount",
+    "origin_balance_before",
+    "destination_balance_before"
+  ],
+  "fingerprint_algorithm": "clickhouse_cityhash64_xor_v1",
+  "fraud_count": 54,
+  "fraud_rate": 0.008264462809917356,
+  "git_sha": "87ba375f9ba32e8b8ccf7fea2da2fba074349741",
+  "label_policy": "static_final_labels",
+  "manifest_schema_version": 1,
+  "max_event_time": "2026-01-01T05:45:52.048000+00:00",
+  "min_event_time": "2026-01-01T00:00:00+00:00",
+  "population_fingerprint": "xor64:3f1a400c9204dedc",
+  "population_query_sha256": "0cd9f2d89d09392a553239f83c7349df45decad56ce4bb399b81c046ccaf06c0",
+  "quality_status": "passed",
+  "row_count": 6534,
+  "run_id": "20260825T081615Z",
+  "snapshot_format": "parquet",
+  "snapshot_sha256": "202a63faeb40136699c3967c08e3713eae2e549f8f0a9532110fbc46a458b422",
+  "snapshot_size_bytes": 134830,
+  "snapshot_uri": "s3://fraud-training-snapshots/fraudguard_logistic_baseline/20260825T081615Z/data.parquet",
+  "source_relation": "fraudguard_ml.ml_training_transactions",
+  "split": {
+    "strategy": "temporal",
+    "test_end": "2026-01-01T06:00:00Z",
+    "train_end": "2026-01-01T02:00:00Z",
+    "validation_end": "2026-01-01T04:00:00Z"
+  },
+  "split_statistics": {
+    "test": {
+      "fraud_count": 16,
+      "fraud_rate": 0.009445100354191263,
+      "max_event_time": "2026-01-01T05:45:52.048000+00:00",
+      "min_event_time": "2026-01-01T04:00:05.413000+00:00",
+      "row_count": 1694
+    },
+    "train": {
+      "fraud_count": 24,
+      "fraud_rate": 0.0064464141821112,
+      "max_event_time": "2026-01-01T02:00:00+00:00",
+      "min_event_time": "2026-01-01T00:00:00+00:00",
+      "row_count": 3723
+    },
+    "validation": {
+      "fraud_count": 14,
+      "fraud_rate": 0.012533572068039392,
+      "max_event_time": "2026-01-01T04:00:00+00:00",
+      "min_event_time": "2026-01-01T02:00:06.521000+00:00",
+      "row_count": 1117
+    }
+  },
+  "target_column": "is_fraud",
+  "training_config_sha256": "f2d76eee5d42a96125409ec3667ea1b9c540e68103a4acc061513dbf81e9e7e0"
+}

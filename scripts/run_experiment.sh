@@ -9,7 +9,7 @@ fi
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_ROOT="airflow_ml_artifacts/model_experiments/${RUN_ID}"
 SHARED_ROOT="${RUN_ROOT}/shared"
-DBT_TARGET="${SHARED_ROOT}/dbt_target"
+DBT_TARGET="$(pwd)/${SHARED_ROOT}/dbt_target"
 CONTRACT_ARTIFACT="${SHARED_ROOT}/artifact.json"
 CACHE_ROOT="${RUN_ROOT}/cache"
 

@@ -61,9 +61,8 @@ def materialize_snapshot(
     manifest: DatasetManifest,
     cache_dir: Path,
 ) -> Path:
-    destination = (
-        cache_dir / "data.parquet"
-    )
+    destination = cache_dir / manifest.experiment_name / "data.parquet"
+    
     if destination.exists():
         if sha256_file(destination) != manifest.snapshot_sha256:
             raise ManifestError("cached snapshot hash does not match manifest")

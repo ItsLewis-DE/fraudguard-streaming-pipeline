@@ -62,7 +62,7 @@ def materialize_snapshot(
     cache_dir: Path,
 ) -> Path:
     destination = (
-        cache_dir / manifest.experiment_name / manifest.run_id / "data.parquet"
+        cache_dir / "data.parquet"
     )
     if destination.exists():
         if sha256_file(destination) != manifest.snapshot_sha256:

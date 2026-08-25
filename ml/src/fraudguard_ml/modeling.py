@@ -23,6 +23,11 @@ from fraudguard_ml.experiment_config import (
 type ModelKind = Literal["logistic_regression", "xgboost"]
 type ProbabilityEstimator = LogisticRegression | XGBClassifier
 
+
+class ModelingError(RuntimeError):
+    """A probability model cannot be fit or used safely."""
+
+
 @dataclass(frozen=True)
 class ModelMetadata:
     """Resolved model and preprocessing facts persisted with the artifact."""
@@ -44,16 +49,6 @@ class ModelMetadata:
             "best_iteration": self.best_iteration,
         }
 
-@dataclass(frozen=True)
-class FittedProbabilityModel:
-    """A fitted preprocessor and estimator exposed through one interface."""
-
-    feature_columns: tuple[str, ...]
-    categorical_columns: tuple[str, ...]
-    numeric_columns: tuple[str, ...]
-    preprocessor: ColumnTransformer
-    estimator: ProbabilityEstimator
-    metadata: ModelMetadata
 
 def _normalize_feature_types(
     frame: pd.DataFrame,
@@ -80,6 +75,7 @@ def _normalize_feature_types(
             ) from exc
     return normalized
 
+
 def _feature_groups(
     config: ExperimentConfig,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -89,11 +85,10 @@ def _feature_groups(
         if column == "transaction_type"
     )
     numeric = tuple(
-        column
-        for column in config.dataset.feature_columns
-        if column not in categorical
+        column for column in config.dataset.feature_columns if column not in categorical
     )
     return categorical, numeric
+
 
 @dataclass(frozen=True)
 class FittedProbabilityModel:
@@ -135,6 +130,7 @@ class FittedProbabilityModel:
             raise ModelingError("predict_proba returned values outside [0, 1]")
         return probability
 
+
 def _build_preprocessor(
     *,
     categorical_columns: tuple[str, ...],
@@ -171,6 +167,7 @@ def _build_preprocessor(
         verbose_feature_names_out=True,
     )
 
+
 def _validate_binary_target(target: pd.Series, *, split_name: str) -> None:
     if target.isna().any():
         raise ModelingError(f"{split_name} target contains null values")
@@ -180,6 +177,7 @@ def _validate_binary_target(target: pd.Series, *, split_name: str) -> None:
             f"{split_name} target must contain both binary classes, got {values}"
         )
 
+
 def _calculate_scale_pos_weight(target: pd.Series) -> float:
     positive_count = int((target == 1).sum())
     negative_count = int((target == 0).sum())
@@ -188,6 +186,7 @@ def _calculate_scale_pos_weight(target: pd.Series) -> float:
             "train target must contain positives and negatives for class weighting"
         )
     return float(negative_count / positive_count)
+
 
 def _fit_logistic_regression(
     *,
@@ -235,6 +234,7 @@ def _fit_logistic_regression(
         estimator=estimator,
         metadata=metadata,
     )
+
 
 def _fit_xgboost(
     *,
@@ -313,6 +313,7 @@ def _fit_xgboost(
         estimator=estimator,
         metadata=metadata,
     )
+
 
 def fit_probability_model(
     config: ExperimentConfig,

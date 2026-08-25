@@ -5,13 +5,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from time import perf_counter
 import joblib
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -22,11 +20,13 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from fraudguard_ml.modeling import ModelingError, fit_probability_model
-from fraudguard_ml.experiment_config import (
-    ExperimentConfig,
-)
+from fraudguard_ml.artifacts import ArtifactError, sha256_file
+from fraudguard_ml.dataset_loader import DatasetSplits
+from fraudguard_ml.dataset_manifest import DatasetManifest
+from fraudguard_ml.experiment_config import ExperimentConfig
 from fraudguard_ml.io_utils import write_json_immutable
+from fraudguard_ml.modeling import ModelingError, fit_probability_model
+
 
 class TrainingError(RuntimeError):
     """Model training cannot produce a trustworthy artifact."""
@@ -127,6 +127,7 @@ def train_and_select_threshold(
     output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "model_bundle.joblib"
     metrics_path = output_dir / "validation_metrics.json"
+    start_at = perf_counter()
     try:
         model = fit_probability_model(
             config,
@@ -135,7 +136,7 @@ def train_and_select_threshold(
         )
     except ModelingError as exc:
         raise TrainingError(str(exc)) from exc
-
+    training_seconds = perf_counter() - start_at
     probability = model.predict_proba(splits.validation.features)[:, 1]
     threshold, selection = select_threshold(
         splits.validation.target,
@@ -143,10 +144,15 @@ def train_and_select_threshold(
         min_precision=config.evaluation.min_precision,
     )
     model_metadata = model.metadata.to_dict()
+    train_rows = len(splits.train.target)
+    train_fraud = int(splits.train.target.sum())
     validation_metrics = {
         **binary_metrics(splits.validation.target, probability, threshold),
         "threshold_selection": selection,
         "model_metadata": model_metadata,
+        "training_seconds": training_seconds,
+        "train_rows": train_rows,
+        "train_fraud": train_fraud,
         "dataset_manifest_sha256": sha256_file(manifest_path),
         "population_fingerprint": manifest.population_fingerprint,
     }
@@ -179,4 +185,7 @@ def train_and_select_threshold(
         "best_iteration": model.metadata.best_iteration,
         "scale_pos_weight": model.metadata.scale_pos_weight,
         "threshold": threshold,
+        "training_seconds": training_seconds,
+        "train_rows": train_rows,
+        "train_fraud": train_fraud,
     }

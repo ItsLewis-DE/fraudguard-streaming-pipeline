@@ -285,13 +285,19 @@ def run_split_diagnostics(args: argparse.Namespace) -> int:
         build_split_diagnostics,
         write_diagnostics,
     )
-    from fraudguard_ml.training import feature_groups
 
-    categorical, numeric = feature_groups(config)
+    categorical = tuple(
+        column
+        for column in config.dataset.feature_columns
+        if column == "transaction_type"
+    )
+    numeric = tuple(
+        column for column in config.dataset.feature_columns if column not in categorical
+    )
     report = build_split_diagnostics(
         splits,
-        numeric_columns=tuple(numeric),
-        categorical_columns=tuple(categorical),
+        numeric_columns=numeric,
+        categorical_columns=categorical,
     )
     write_diagnostics(args.output, report)
     print(args.output)

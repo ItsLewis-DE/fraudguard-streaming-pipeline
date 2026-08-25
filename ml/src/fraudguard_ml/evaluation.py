@@ -14,7 +14,6 @@ from fraudguard_ml.modeling import FittedProbabilityModel, ModelingError
 from fraudguard_ml.training import binary_metrics
 
 
-
 def evaluate_test_split(
     *,
     test: FrameSplit,

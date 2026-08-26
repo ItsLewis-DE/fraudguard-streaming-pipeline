@@ -4,7 +4,8 @@ FraudGuard là dự án demo một quy trình dữ liệu và machine learning e
 bài toán phát hiện giao dịch gian lận ngân hàng. Dữ liệu PaySim được phát lại như
 một luồng sự kiện, kiểm tra schema và chất lượng, lưu thành các landing bất biến,
 chuẩn hóa bằng dbt, snapshot có lineage, sau đó huấn luyện và đánh giá mô hình
-theo cách chia dữ liệu thời gian.
+theo cách chia dữ liệu thời gian. Dự án hiện so sánh Logistic Regression và
+XGBoost trên hai bộ feature, sau đó đưa model được chọn vào DAG training riêng.
 
 ## 1. Mục tiêu bài toán và kết quả đạt được
 
@@ -18,8 +19,10 @@ theo cách chia dữ liệu thời gian.
   train không chứa feature leakage.
 - Tạo snapshot Parquet bất biến kèm manifest, hash, Git SHA, data fingerprint và
   thống kê temporal split để một model run có thể truy vết lại.
-- Huấn luyện baseline Logistic Regression và chọn threshold trên validation theo
-  chiến lược `max_recall_at_min_precision`.
+- So sánh bốn candidate `Logistic Regression/XGBoost × baseline/balance`, chỉ
+  dùng validation để chọn model và khóa test cho lần đánh giá cuối.
+- Đưa XGBoost với balance-consistency features vào DAG training đã chọn; threshold
+  được chọn trên validation theo chiến lược `max_recall_at_min_precision`.
 
 ### Các con số chính
 
@@ -31,32 +34,24 @@ theo cách chia dữ liệu thời gian.
 | Kiểm tra domain EDA | 0 type sai, 0 `isFraud` sai, 0 `isFlaggedFraud` sai |
 | Snapshot model demo | 6.534 dòng, 54 fraud — 0,8264% |
 | Temporal split demo | Train 3.723/24 fraud; Validation 1.117/14; Test 1.694/16 |
-| Test ROC-AUC | 0,9158 |
-| Test PR-AUC | 0,1437 |
-| Test recall / fraud capture | 93,75% — bắt 15/16 fraud |
-| Test precision | 8,29% |
-| Test alert rate | 10,68% |
-| Test confusion matrix | TP 15 · FN 1 · FP 166 · TN 1.512 |
-| Python unit assertions | 33 passed khi chạy `pytest --no-cov` |
-| Coverage hiện tại | 18,60% — chưa đạt quality gate 80% |
-| Static typing | mypy: 0 lỗi trên 22 source files |
-| dbt build quan sát gần nhất | PASS 157 · WARN 0 · ERROR 0 |
+| Experiment winner trên validation | Candidate D — XGBoost + balance features |
+| Winner validation PR-AUC / recall | 0,9556 / 100% — bắt 14/14 fraud |
+| Selected-model test ROC-AUC / PR-AUC | 1,0000 / 1,0000 |
+| Selected-model test recall / fraud capture | 100% — bắt 16/16 fraud |
+| Selected-model test precision / alert rate | 7,21% / 13,11% |
+| Selected-model test confusion matrix | TP 16 · FN 0 · FP 206 · TN 1.472 |
 
 > [!IMPORTANT]
 > Các metric model phía trên **chỉ có giá trị tham khảo để chứng minh pipeline
 > hoạt động end-to-end**. EDA đã đọc toàn bộ CSV 6,36 triệu dòng, nhưng snapshot
 > dùng để train mới có 6.534 dòng và chỉ 54 fraud vì dữ liệu streaming chưa được
-> load đầy đủ. Đây là demo quy trình local, chưa phải kết quả production, chưa đủ
-> để kết luận chất lượng mô hình hay chọn threshold vận hành.
+> load đầy đủ. Test chỉ có 16 fraud; PR-AUC/ROC-AUC bằng 1,0 vì vậy có độ bất định
+> rất lớn và không phải bằng chứng model sẵn sàng production.
 
-Trên validation, threshold `0,07398` đạt đúng precision tối thiểu 10% với recall
-92,86%; sang test, precision giảm còn 8,29%. Test chỉ có 16 fraud positive nên
-mọi metric đều có độ bất định lớn. Mô hình cho thấy tín hiệu xếp hạng đáng chú ý,
-nhưng số false positive vẫn cao: 166 false alerts để bắt 15 fraud.
 
 ## 2. Kiến trúc
 
-![FraudGuard architecture](reports/architecture/fraudguard-pipeline.png)
+![FraudGuard architecture](reports/architecture/fraudguard-data-ml-pipeline-excalidraw-dark-with-icons.png)
 
 Luồng chính:
 
@@ -75,9 +70,9 @@ Luồng chính:
 5. dbt tạo các lớp `staging → intermediate → core → ml`, canonicalize replay theo
    business key `(source, event_id)`, phát hiện payload conflict và loại dòng
    không đủ điều kiện train.
-6. DAG `fraudguard_training_baseline` chạy quality gate, tạo immutable snapshot,
-   temporal split, split diagnostics, train Logistic Regression và evaluate trên
-   test set chưa từng dùng để chọn threshold.
+6. DAG `fraudguard_training_selected` chạy quality gate, tạo immutable snapshot,
+   temporal split, split diagnostics, train XGBoost với bộ balance features và
+   evaluate trên test set chưa từng dùng để chọn model hoặc threshold.
 
 ### Orchestration
 
@@ -85,7 +80,7 @@ Luồng chính:
 | --- | --- | --- |
 | `minio_to_clickhouse` | Mỗi phút | Khám phá, validate và dynamically map các batch MinIO vào ClickHouse |
 | `fraudguard_dbt_build` | Mỗi 5 phút | Build models và chạy dbt tests với fail-fast |
-| `fraudguard_training_baseline` | Manual | Snapshot → diagnostics → train → evaluate |
+| `fraudguard_training_selected` | Manual | Snapshot → diagnostics → selected model → test evaluation |
 
 ## 3. Kết quả chạy pipeline
 
@@ -118,10 +113,12 @@ domain cùng các singular data-quality tests.
 
 ![Airflow dbt build DAG](images/airflow/image2.png)
 
-### Airflow — training baseline
+### Airflow — selected-model training
 
 Training DAG chạy tuần tự bốn bước: chuẩn bị snapshot, chẩn đoán split, train và
-evaluate. Artifact chỉ được xuất khi data contract và các điều kiện split đạt.
+evaluate. Mặc định DAG dùng `training_selected.yml` cho XGBoost + balance features;
+baseline Logistic Regression vẫn được giữ làm cấu hình rollback rõ ràng. Artifact
+chỉ được xuất khi data contract và các điều kiện split đạt.
 
 ![Airflow training DAG](images/airflow/image.png)
 
@@ -162,23 +159,95 @@ Các dòng thiếu final label, payload conflict, amount âm hoặc balance âm 
 khỏi `ml_training_transactions`. ClickHouse sử dụng các role tách biệt cho loader,
 dbt transformer và read-only ML reader.
 
-## 5. Baseline machine learning
+## 5. Machine learning và model experiments
 
-Baseline hiện tại sử dụng:
+### 5.1. Thiết kế experiment
 
-- Logistic Regression với `class_weight="balanced"`, `C=1.0`, `max_iter=500`;
-- one-hot encoding cho `transaction_type`;
-- các feature: `transaction_type`, `amount`, `origin_balance_before`,
-  `destination_balance_before`;
-- temporal split, tuyệt đối không shuffle xuyên thời gian;
-- chọn threshold trên validation, evaluate đúng một lần trên test;
-- random seed 42 và giới hạn runtime để tăng tính tái lập.
+Experiment so sánh hai họ model trên cùng một population fingerprint, temporal
+split và threshold strategy:
+
+| Candidate | Model | Bộ feature |
+| --- | --- | --- |
+| A | Logistic Regression | Baseline |
+| B | XGBoost | Baseline |
+| C | Logistic Regression | Balance |
+| D | XGBoost | Balance |
+
+Bộ baseline gồm `transaction_type`, `amount`, `origin_balance_before` và
+`destination_balance_before`. Bộ balance mở rộng lên 13 feature bằng số dư sau
+giao dịch, balance delta, amount residual và các cờ zero-balance. Các cột định
+danh, thời gian, target và `is_flagged_fraud` bị cấm làm feature để tránh leakage.
+
+Logistic Regression dùng one-hot encoding, standard scaling và
+`class_weight="balanced"`. XGBoost dùng `binary:logistic`, `aucpr`, histogram
+trees, early stopping và `scale_pos_weight` tính từ tỷ lệ class ở train. Cả hai
+dùng seed 42. Dữ liệu được chia theo thời gian, không shuffle:
+
+| Split | Khoảng thời gian | Số dòng | Fraud |
+| --- | --- | ---: | ---: |
+| Train | 00:00–02:00 UTC | 3.723 | 24 |
+| Validation | 02:00–04:00 UTC | 1.117 | 14 |
+| Test | 04:00–06:00 UTC | 1.694 | 16 |
+
+### 5.2. Kết quả validation và model selection
+
+Kết quả controlled run `20260825T082223Z`:
+
+| Candidate | Validation PR-AUC | ROC-AUC | Precision | Recall | Alert rate | Train time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A · Logistic · Baseline | 0,5661 | 0,9323 | 10,00% | 92,86% | 11,64% | 0,124 s |
+| B · XGBoost · Baseline | 0,7560 | 0,9934 | 10,00% | 100% | 12,53% | 0,219 s |
+| C · Logistic · Balance | 0,8484 | 0,9986 | 10,00% | 100% | 12,53% | 0,146 s |
+| **D · XGBoost · Balance** | **0,9556** | **0,9985** | **10,14%** | **100%** | **12,35%** | **0,189 s** |
+
+![Validation metric overview](reports/model_experiments/20260825T082223Z/validation_metric_overview.png)
+
+![Validation precision-recall curves](reports/model_experiments/20260825T082223Z/validation_pr_curve.png)
+
+Quy tắc chọn model yêu cầu precision tối thiểu 10%, sau đó ưu tiên recall,
+PR-AUC và alert rate. Candidate D được chọn vì bắt đủ 14/14 fraud trên validation,
+có PR-AUC cao nhất và vượt candidate Logistic tốt nhất 0,1072 PR-AUC. Test không
+được dùng trong quá trình so sánh hoặc chọn candidate.
+
+Balance-consistency features tạo cải thiện rõ rệt cho cả hai họ model. Với
+XGBoost, feature importance cũng cho thấy các biến residual/delta đóng góp tín
+hiệu bổ sung ngoài amount và loại giao dịch:
+
+![XGBoost feature importance](reports/model_experiments/20260825T082223Z/feature_importance.png)
+
+### 5.3. Đánh giá selected model trên test
+
+DAG `fraudguard_training_selected` huấn luyện lại candidate D bằng
+`configs/training_selected.yml`, chọn threshold hoàn toàn trên validation, sau đó
+đánh giá test đúng một lần. Run `20260826T030355` cho kết quả:
+
+| Metric test | Kết quả |
+| --- | ---: |
+| ROC-AUC / PR-AUC | 1,0000 / 1,0000 |
+| Precision / recall | 7,21% / 100% |
+| F1 / alert rate | 0,1345 / 13,11% |
+| Confusion matrix | TP 16 · FN 0 · FP 206 · TN 1.472 |
+
+Kết quả ranking hoàn hảo cần được đọc cùng kích thước test rất nhỏ. Threshold
+đạt precision gate trên validation nhưng precision giảm còn 7,21% trên test, cho
+thấy threshold và tải cảnh báo chưa ổn định.
+
+### 5.4. Tái lập experiment và artifacts
+
+Chạy lại ma trận bốn candidate trên cùng snapshot logic:
+
+```bash
+bash scripts/run_experiment.sh
+```
+
+Notebook `notebooks/experiment_models.ipynb` đọc artifact của bốn candidate, kiểm
+tra population fingerprint, tạo bảng/biểu đồ và áp dụng model-selection rule.
+Các báo cáo đã export nằm trong
+`reports/model_experiments/20260825T082223Z/`.
 
 Snapshot manifest lưu data/config/dbt/query hash, population fingerprint, Git SHA,
 feature list, split boundaries và split statistics. Model artifact liên kết lại
-manifest qua SHA-256.
-
-Artifact của mỗi run nằm tại:
+manifest qua SHA-256. Artifact của mỗi selected-model run nằm tại:
 
 ```text
 airflow_ml_artifacts/training/<run_id>/
@@ -289,9 +358,18 @@ test_end: "2026-01-01T06:00:00Z"
 Chạy DAG:
 
 ```bash
-docker compose exec airflow-scheduler airflow dags unpause fraudguard_training_baseline
-docker compose exec airflow-scheduler airflow dags trigger fraudguard_training_baseline
+docker compose exec airflow-scheduler \
+  airflow dags unpause fraudguard_training_selected
+
+docker compose exec airflow-scheduler \
+  airflow dags trigger \
+  --conf '{"config_file":"training_selected.yml"}' \
+  fraudguard_training_selected
 ```
+
+Để rollback có chủ đích về Logistic Regression baseline, truyền
+`training_baseline.yml` thay cho `training_selected.yml`. DAG chỉ chấp nhận hai
+config đã được allowlist này.
 
 ### 6.6. Kiểm thử local
 
@@ -303,9 +381,10 @@ uv run mypy
 ```
 
 Quality gate đầy đủ được chạy bằng `uv run pytest`. Ở trạng thái hiện tại, cả 33
-test đều pass nhưng command vẫn trả exit code khác 0 vì tổng coverage 18,60% chưa
-đạt ngưỡng `--cov-fail-under=80`. `ruff check .` cũng còn 5 lỗi nằm trong notebook
-EDA; đây là technical debt đã biết, không nên diễn giải là toàn bộ CI đang xanh.
+test đều pass nhưng command vẫn trả exit code khác 0 vì tổng coverage 16,58% chưa
+đạt ngưỡng `--cov-fail-under=80`. `uv run mypy` không báo lỗi trên 23 source files;
+`ruff check .` còn 12 lỗi trong hai Python modules và hai notebook. Đây là
+technical debt đã biết, không nên diễn giải là toàn bộ CI đang xanh.
 
 ### 6.7. Dừng stack
 
@@ -343,10 +422,11 @@ triển trên máy cá nhân.
 ├── images/                       # Ảnh kết quả chạy Kafka, MinIO và Airflow
 ├── ml/src/fraudguard_ml/         # Snapshot, lineage, train, diagnostics, evaluate
 ├── ml/tests/                     # Unit tests
-├── notebooks/EDA.ipynb           # Exploratory data analysis hiện có
+├── notebooks/                    # EDA và model experiment notebooks
 ├── producer/                     # CSV-to-Kafka Avro producer
-├── reports/                      # EDA outputs và architecture diagram
+├── reports/                      # EDA, model comparison và architecture outputs
 ├── schemas/                      # Transaction và label Avro schemas
+├── scripts/run_experiment.sh     # Chạy ma trận model × feature set
 ├── spark/jobs/                   # Shared landing engine và hai entry-point jobs
 ├── docker-compose.yml
 └── pyproject.toml
@@ -364,41 +444,24 @@ triển trên máy cá nhân.
   drift monitoring, production secrets manager hay high-availability deployment.
 - Spark jobs được submit thủ công và cấu hình local ưu tiên khả năng chạy trên máy
   cá nhân hơn throughput tối đa.
-- Baseline hiện chỉ train một Logistic Regression; chưa tự động so sánh nhiều
-  thuật toán và chưa có cơ chế promote model tốt nhất.
-- 33 unit assertions đã pass, nhưng coverage 18,60% còn thấp hơn quality gate 80%
-  và notebook EDA còn 5 cảnh báo/lỗi Ruff cần xử lý.
+- Experiment hiện mới dùng một temporal split với 14 fraud ở validation và 16
+  fraud ở test; chưa có repeated folds, confidence interval hay kiểm định độ ổn
+  định theo thời gian.
+- Việc chọn candidate đã có rule và selected config, nhưng chưa có model registry,
+  approval workflow hoặc cơ chế promotion/rollback tự động.
 
 ## 10. Hướng cải tiến
 
-Ưu tiên tiếp theo là bổ sung notebook chuyên cho experimentation và model
-selection, tách khỏi notebook EDA hiện có:
+Các bước tiếp theo cho phần modeling:
 
-1. Tạo `notebooks/model_experiments.ipynb` dùng cùng immutable snapshot và temporal
-   split của pipeline.
-2. So sánh baseline feature set với các balance-consistency feature đã có trong
-   `training_challenger_balance.yml`, không dùng forbidden/leakage columns.
-3. So sánh Logistic Regression với tree-based models phù hợp dữ liệu mất cân bằng;
-   dùng PR-AUC, recall tại precision tối thiểu, alert rate và calibration làm tiêu
-   chí chính thay vì accuracy.
-4. Chạy nhiều temporal folds/seeds, lưu bảng so sánh và confidence interval thay
-   vì chọn model từ một test split nhỏ.
-5. Chọn threshold trên validation, khóa test set cho đánh giá cuối và chỉ promote
-   model khi vượt quality gates định trước.
-6. Sau khi thử nghiệm ổn định, chuyển preprocessing/model/config tốt nhất từ
-   notebook vào package `fraudguard_ml`, thêm test và orchestrate bằng Airflow.
-
-Ngoài ra cần load đủ 6,36 triệu dòng, mở rộng lại split theo toàn bộ thời gian,
-tăng Spark throughput có đo lường, tự động submit/giám sát streaming jobs và bổ
-sung registry, serving, monitoring cùng quy trình rollback trước khi cân nhắc
-production.
-
-## 11. Tài liệu và artifacts liên quan
-
-- [ML package notes](ml/README.md)
-- [Baseline config](configs/training_baseline.yml)
-- [Challenger balance config](configs/training_challenger_balance.yml)
-- [Training data contract](configs/training_data_contract.yml)
-- [EDA notebook](notebooks/EDA.ipynb)
-- [Architecture diagram](reports/architecture/fraudguard-pipeline.png)
-- [XGBoost experiment roadmap](XGBOOST_EXPERIMENT_ROADMAP.md)
+1. Load đủ 6,36 triệu dòng và mở rộng temporal split theo toàn bộ thời gian thay
+   vì cửa sổ demo sáu giờ.
+2. Chạy repeated temporal folds/seeds, báo confidence interval và stability theo
+   từng giai đoạn thay vì dựa trên 14–16 fraud positive.
+3. Hiệu chỉnh probability và threshold theo chi phí review thực tế; theo dõi
+   precision, recall, alert volume và calibration drift sau mỗi lần train.
+4. Tự động hóa model-selection report từ artifact, thêm quality gate để chỉ tạo
+   candidate promotion khi metric và data lineage đều hợp lệ.
+5. Bổ sung model registry, approval workflow, serving, monitoring và rollback;
+   giữ test set khóa cho đánh giá cuối của mỗi model version.
+6. Thêm các test cho các phần của dữ liệu.

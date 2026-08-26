@@ -176,9 +176,7 @@ class XGBoostConfig(StrictModel):
         """Require at least one boosting round beyond early stopping patience."""
 
         if self.early_stopping_rounds >= self.n_estimators:
-            raise ValueError(
-                "early_stopping_rounds must be smaller than n_estimators"
-            )
+            raise ValueError("early_stopping_rounds must be smaller than n_estimators")
         return self
 
 
@@ -186,6 +184,7 @@ ModelConfig = Annotated[
     LogisticRegressionConfig | XGBoostConfig,
     Field(discriminator="kind"),
 ]
+
 
 class EvaluationConfig(StrictModel):
     """Threshold-selection policy used on the validation partition."""

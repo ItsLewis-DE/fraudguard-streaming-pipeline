@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 
 import pendulum
@@ -32,6 +33,7 @@ if DEFAULT_CONFIG_FILE not in ALLOWED_CONFIG_FILES:
     )
 
 CONFIG = f"{PROJECT}/configs/{{{{ params.config_file }}}}"
+
 
 @dag(
     dag_id="fraudguard_training_selected",

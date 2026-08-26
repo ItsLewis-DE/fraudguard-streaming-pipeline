@@ -10,7 +10,8 @@ from fraudguard_ml.dataset_loader import FrameSplit
 from fraudguard_ml.dataset_manifest import DatasetManifest, ManifestError
 from fraudguard_ml.experiment_config import ExperimentConfig
 from fraudguard_ml.io_utils import write_json_immutable
-from fraudguard_ml.training import binary_metrics, normalize_feature_types
+from fraudguard_ml.modeling import FittedProbabilityModel, ModelingError
+from fraudguard_ml.training import binary_metrics
 
 
 def evaluate_test_split(
@@ -22,7 +23,11 @@ def evaluate_test_split(
     model_path: Path,
     output_path: Path,
 ) -> dict[str, Any]:
-    bundle = joblib.load(model_path)
+    payload = joblib.load(model_path)
+    if not isinstance(payload, dict):
+        raise ManifestError("model artifact must contain a mapping bundle")
+    bundle: dict[str, Any] = payload
+
     manifest_sha256 = sha256_file(manifest_path)
     if bundle.get("dataset_manifest_sha256") != manifest_sha256:
         raise ManifestError("model and evaluation manifest do not match")
@@ -30,8 +35,19 @@ def evaluate_test_split(
         raise ManifestError("model feature order does not match config")
     if bundle.get("population_fingerprint") != manifest.population_fingerprint:
         raise ManifestError("model population fingerprint does not match manifest")
-    features = normalize_feature_types(test.features, config)
-    probability = bundle["pipeline"].predict_proba(features)[:, 1]
+
+    model = bundle.get("model")
+    if not isinstance(model, FittedProbabilityModel):
+        raise ManifestError("model bundle does not contain a fitted probability model")
+    if model.feature_columns != config.dataset.feature_columns:
+        raise ManifestError("fitted model feature order does not match config")
+    if model.metadata.model_kind != config.model.kind:
+        raise ManifestError("fitted model kind does not match config")
+
+    try:
+        probability = model.predict_proba(test.features)[:, 1]
+    except ModelingError as exc:
+        raise ManifestError(f"model prediction failed: {exc}") from exc
     metrics = binary_metrics(test.target, probability, float(bundle["threshold"]))
     result = {
         "evaluation_schema_version": 1,

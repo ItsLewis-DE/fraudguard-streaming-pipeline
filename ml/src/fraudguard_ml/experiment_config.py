@@ -13,9 +13,9 @@ by snapshotting and later model-training stages.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, PositiveFloat, PositiveInt, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from fraudguard_ml.config import RuntimeConfig, StrictModel
 from fraudguard_ml.training_data_contract import (
@@ -144,13 +144,46 @@ class SnapshotConfig(StrictModel):
         return value
 
 
-class ModelConfig(StrictModel):
-    """Supported baseline estimator and its bounded hyperparameters."""
+class LogisticRegressionConfig(StrictModel):
+    """Bounded hyperparameters for the Logistic Regression baseline."""
 
     kind: Literal["logistic_regression"]
     class_weight: Literal["balanced"] = "balanced"
-    regularization_c: PositiveFloat = 1.0
-    max_iter: PositiveInt = 500
+    regularization_c: float = Field(1.0, gt=0.0, le=1_000.0)
+    max_iter: int = Field(500, ge=50, le=10_000)
+
+
+class XGBoostConfig(StrictModel):
+    """CPU-safe hyperparameters for the XGBoost fraud challenger."""
+
+    kind: Literal["xgboost"]
+    objective: Literal["binary:logistic"] = "binary:logistic"
+    eval_metric: Literal["aucpr"] = "aucpr"
+    tree_method: Literal["hist"] = "hist"
+    n_estimators: int = Field(1_000, ge=1, le=10_000)
+    learning_rate: float = Field(0.05, gt=0.0, le=1.0)
+    max_depth: int = Field(4, ge=1, le=16)
+    min_child_weight: float = Field(10.0, ge=0.0)
+    subsample: float = Field(0.8, gt=0.0, le=1.0)
+    colsample_bytree: float = Field(0.8, gt=0.0, le=1.0)
+    reg_alpha: float = Field(0.0, ge=0.0)
+    reg_lambda: float = Field(1.0, ge=0.0)
+    early_stopping_rounds: int = Field(50, ge=1)
+    imbalance_strategy: Literal["none", "train_ratio"] = "train_ratio"
+
+    @model_validator(mode="after")
+    def validate_early_stopping(self) -> Self:
+        """Require at least one boosting round beyond early stopping patience."""
+
+        if self.early_stopping_rounds >= self.n_estimators:
+            raise ValueError("early_stopping_rounds must be smaller than n_estimators")
+        return self
+
+
+ModelConfig = Annotated[
+    LogisticRegressionConfig | XGBoostConfig,
+    Field(discriminator="kind"),
+]
 
 
 class EvaluationConfig(StrictModel):

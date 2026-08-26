@@ -14,6 +14,9 @@ dbt/dbt_packages/
 # Airflow runtime data is stored in Docker named volumes.
 airflow/logs/
 
+# Immutable ML snapshots, model bundles, reports, and Airflow run artifacts.
+airflow_ml_artifacts/
+
 # The PaySim dataset is larger than GitHub's regular file limit.
 data/*.csv
 !data/.gitkeep
@@ -28,4 +31,3 @@ htmlcov/
 
 AGENTS.md
 /docs/*
-

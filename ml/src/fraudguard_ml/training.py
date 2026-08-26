@@ -3,15 +3,13 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -21,87 +19,17 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from fraudguard_ml.artifacts import ArtifactError, sha256_file
 from fraudguard_ml.dataset_loader import DatasetSplits
 from fraudguard_ml.dataset_manifest import DatasetManifest
 from fraudguard_ml.experiment_config import ExperimentConfig
 from fraudguard_ml.io_utils import write_json_immutable
+from fraudguard_ml.modeling import ModelingError, fit_probability_model
 
 
 class TrainingError(RuntimeError):
     """Model training cannot produce a trustworthy artifact."""
-
-
-def feature_groups(config: ExperimentConfig) -> tuple[list[str], list[str]]:
-    categorical = [
-        column
-        for column in config.dataset.feature_columns
-        if column == "transaction_type"
-    ]
-    numeric = [
-        column for column in config.dataset.feature_columns if column not in categorical
-    ]
-    return categorical, numeric
-
-
-def normalize_feature_types(
-    frame: pd.DataFrame,
-    config: ExperimentConfig,
-) -> pd.DataFrame:
-    normalized = frame.loc[:, list(config.dataset.feature_columns)].copy()
-    categorical, numeric = feature_groups(config)
-    for column in categorical:
-        normalized[column] = normalized[column].astype("string")
-    for column in numeric:
-        normalized[column] = pd.to_numeric(normalized[column], errors="raise").astype(
-            "float64"
-        )
-    return normalized
-
-
-def build_pipeline(config: ExperimentConfig) -> Pipeline:
-    categorical, numeric = feature_groups(config)
-    categorical_pipeline = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            (
-                "one_hot",
-                OneHotEncoder(handle_unknown="ignore", sparse_output=True),
-            ),
-        ]
-    )
-    numeric_pipeline = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-        ]
-    )
-    transformers: list[tuple[str, Pipeline, list[str]]] = []
-    if categorical:
-        transformers.append(("categorical", categorical_pipeline, categorical))
-    if numeric:
-        transformers.append(("numeric", numeric_pipeline, numeric))
-    preprocessing = ColumnTransformer(
-        transformers=transformers,
-        remainder="drop",
-        verbose_feature_names_out=True,
-    )
-    estimator = LogisticRegression(
-        C=config.model.regularization_c,
-        class_weight=config.model.class_weight,
-        max_iter=config.model.max_iter,
-        random_state=config.runtime.random_seed,
-        solver="lbfgs",
-    )
-    return Pipeline(
-        steps=[
-            ("preprocessing", preprocessing),
-            ("estimator", estimator),
-        ]
-    )
 
 
 def select_threshold(
@@ -199,25 +127,39 @@ def train_and_select_threshold(
     output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "model_bundle.joblib"
     metrics_path = output_dir / "validation_metrics.json"
-    train_features = normalize_feature_types(splits.train.features, config)
-    validation_features = normalize_feature_types(splits.validation.features, config)
-    pipeline = build_pipeline(config)
-    pipeline.fit(train_features, splits.train.target)
-    probability = pipeline.predict_proba(validation_features)[:, 1]
+    start_at = perf_counter()
+    try:
+        model = fit_probability_model(
+            config,
+            splits.train,
+            splits.validation,
+        )
+    except ModelingError as exc:
+        raise TrainingError(str(exc)) from exc
+    training_seconds = perf_counter() - start_at
+    probability = model.predict_proba(splits.validation.features)[:, 1]
     threshold, selection = select_threshold(
         splits.validation.target,
         probability,
         min_precision=config.evaluation.min_precision,
     )
+    model_metadata = model.metadata.to_dict()
+    train_rows = len(splits.train.target)
+    train_fraud = int(splits.train.target.sum())
     validation_metrics = {
         **binary_metrics(splits.validation.target, probability, threshold),
         "threshold_selection": selection,
+        "model_metadata": model_metadata,
+        "training_seconds": training_seconds,
+        "train_rows": train_rows,
+        "train_fraud": train_fraud,
         "dataset_manifest_sha256": sha256_file(manifest_path),
         "population_fingerprint": manifest.population_fingerprint,
     }
     bundle = {
         "bundle_schema_version": 1,
-        "pipeline": pipeline,
+        "model": model,
+        "model_metadata": model_metadata,
         "threshold": threshold,
         "feature_list": list(config.dataset.feature_columns),
         "target_column": config.dataset.target_column,
@@ -226,8 +168,9 @@ def train_and_select_threshold(
         "experiment_name": config.experiment_name,
         "run_id": manifest.run_id,
         "dataset_manifest_sha256": sha256_file(manifest_path),
-        "dataset_manifest_uri": manifest.snapshot_uri.rsplit("/", 1)[0]
-        + "/dataset_manifest.json",
+        "dataset_manifest_uri": (
+            manifest.snapshot_uri.rsplit("/", 1)[0] + "/dataset_manifest.json"
+        ),
         "population_fingerprint": manifest.population_fingerprint,
         "config": config.model_dump(mode="json"),
         "validation_metrics": validation_metrics,
@@ -238,5 +181,11 @@ def train_and_select_threshold(
         "model_path": str(model_path),
         "model_sha256": sha256_file(model_path),
         "validation_metrics_path": str(metrics_path),
+        "model_kind": model.metadata.model_kind,
+        "best_iteration": model.metadata.best_iteration,
+        "scale_pos_weight": model.metadata.scale_pos_weight,
         "threshold": threshold,
+        "training_seconds": training_seconds,
+        "train_rows": train_rows,
+        "train_fraud": train_fraud,
     }

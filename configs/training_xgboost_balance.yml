@@ -1,11 +1,16 @@
 schema_version: 1
-experiment_name: fraudguard_balance_challenger
+experiment_name: fraudguard_xgboost_balance
 
 dataset:
   relation: fraudguard_ml.ml_training_transactions
   prediction_point: post_ledger_update
-  id_columns: [source, event_id]
-  split_columns: [event_time, event_date, step]
+  id_columns:
+    - source
+    - event_id
+  split_columns:
+    - event_time
+    - event_date
+    - step
   feature_columns:
     - transaction_type
     - amount
@@ -46,10 +51,20 @@ snapshot:
   label_policy: static_final_labels
 
 model:
-  kind: logistic_regression
-  class_weight: balanced
-  regularization_c: 1.0
-  max_iter: 500
+  kind: xgboost
+  objective: binary:logistic
+  eval_metric: aucpr
+  tree_method: hist
+  n_estimators: 1000
+  learning_rate: 0.05
+  max_depth: 4
+  min_child_weight: 10.0
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_alpha: 0.0
+  reg_lambda: 1.0
+  early_stopping_rounds: 50
+  imbalance_strategy: train_ratio
 
 evaluation:
   threshold_strategy: max_recall_at_min_precision

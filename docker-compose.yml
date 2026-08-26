@@ -37,6 +37,7 @@ x-airflow-common: &airflow-common
     DBT_LOG_PATH: /opt/airflow/logs/dbt/logs
 
     PYTHONPATH: /opt/airflow/project/ml/src
+    FRAUDGUARD_TRAINING_CONFIG_FILE: ${FRAUDGUARD_TRAINING_CONFIG_FILE:-training_selected.yml}
     CLICKHOUSE_ML_HOST: clickhouse
     CLICKHOUSE_ML_PORT: "8123"
     CLICKHOUSE_ML_DATABASE: fraudguard

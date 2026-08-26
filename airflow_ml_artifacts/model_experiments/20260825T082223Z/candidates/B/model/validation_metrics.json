@@ -1,0 +1,51 @@
+{
+  "alert_rate": 0.12533572068039392,
+  "confusion_matrix": {
+    "false_negative": 0,
+    "false_positive": 126,
+    "true_negative": 977,
+    "true_positive": 14
+  },
+  "dataset_manifest_sha256": "41d4270a2a53f32939ecea775b11d09dbb822cbfcda9c3e684ddd917b112b1d8",
+  "f1": 0.18181818181818182,
+  "fraud_capture_rate": 1.0,
+  "model_metadata": {
+    "best_iteration": 159,
+    "model_kind": "xgboost",
+    "numeric_scaling": "none",
+    "resolved_hyperparameters": {
+      "colsample_bytree": 0.8,
+      "early_stopping_rounds": 50,
+      "eval_metric": "aucpr",
+      "imbalance_strategy": "train_ratio",
+      "kind": "xgboost",
+      "learning_rate": 0.05,
+      "max_depth": 4,
+      "min_child_weight": 10.0,
+      "n_estimators": 1000,
+      "n_jobs": 8,
+      "objective": "binary:logistic",
+      "random_state": 42,
+      "reg_alpha": 0.0,
+      "reg_lambda": 1.0,
+      "scale_pos_weight": 154.125,
+      "subsample": 0.8,
+      "tree_method": "hist"
+    },
+    "scale_pos_weight": 154.125
+  },
+  "population_fingerprint": "xor64:3f1a400c9204dedc",
+  "pr_auc": 0.755989731397666,
+  "precision": 0.1,
+  "recall": 1.0,
+  "roc_auc": 0.9933622587747701,
+  "threshold": 0.009112711064517498,
+  "threshold_selection": {
+    "strategy_result": "max_recall_at_min_precision",
+    "validation_precision": 0.1,
+    "validation_recall": 1.0
+  },
+  "train_fraud": 24,
+  "train_rows": 3723,
+  "training_seconds": 0.2190498470008606
+}

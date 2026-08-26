@@ -56,7 +56,7 @@ while IFS='|' read -r CANDIDATE_ID MODEL_KIND FEATURE_SET CONFIG_PATH; do
         --cache-dir "${CACHE_ROOT}" \
         --output "${MODEL_DIR}"
 
-    printf '✅ Candidate %s finished successfully!\n' "${CANDIDATE_ID}"
+    printf 'Candidate %s finished successfully!\n' "${CANDIDATE_ID}"
 done <<'EOF'
 A|logistic_regression|baseline|configs/training_baseline.yml
 B|xgboost|baseline|configs/training_xgboost_baseline.yml

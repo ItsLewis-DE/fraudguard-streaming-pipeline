@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
-from time import perf_counter
 import joblib
 import numpy as np
 import pandas as pd
